@@ -341,6 +341,12 @@ async function sendRequestToProvider(
     const clientXApiKey = context?.req?.headers?.["x-api-key"];
     if (clientXApiKey) {
       effectiveApiKey = Array.isArray(clientXApiKey) ? clientXApiKey[0] : clientXApiKey;
+      const maskToken = effectiveApiKey.length > 8
+        ? `${effectiveApiKey.substring(0, 8)}...${effectiveApiKey.substring(effectiveApiKey.length - 4)}`
+        : "***";
+      fastify.log.info(`[Token Passthrough] Received x-api-key from client for provider '${provider.name}'. Key: ${maskToken}`);
+    } else {
+      fastify.log.warn(`[Token Passthrough] Provider '${provider.name}' has empty api_key, but no x-api-key header received from client!`);
     }
   }
 
