@@ -105,7 +105,7 @@ export async function extractPreset(sourceZip: string, targetDir: string): Promi
       const singleRoot = Array.from(rootDirs)[0];
 
       // Check if manifest.json is in root directory
-      const hasManifestInRoot = entries.some(e =>
+      const hasManifestInRoot = entries.some((e: any) =>
         e.entryName === 'manifest.json' || e.entryName.startsWith(`${singleRoot}/manifest.json`)
       );
 
