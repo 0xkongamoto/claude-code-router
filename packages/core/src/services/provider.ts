@@ -31,8 +31,7 @@ export class ProviderService {
       try {
         if (
           !providerConfig.name ||
-          !providerConfig.api_base_url ||
-          !providerConfig.api_key
+          !providerConfig.api_base_url
         ) {
           return;
         }

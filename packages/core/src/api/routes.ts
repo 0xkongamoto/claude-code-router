@@ -334,8 +334,18 @@ async function sendRequestToProvider(
 
   // Send HTTP request
   // Prepare headers
+  // Token passthrough: if provider.apiKey is empty, forward x-api-key from incoming request
+  // Claude Code always sends ANTHROPIC_API_KEY via x-api-key header
+  let effectiveApiKey = provider.apiKey;
+  if (!effectiveApiKey) {
+    const clientXApiKey = context?.req?.headers?.["x-api-key"];
+    if (clientXApiKey) {
+      effectiveApiKey = Array.isArray(clientXApiKey) ? clientXApiKey[0] : clientXApiKey;
+    }
+  }
+
   const requestHeaders: Record<string, string> = {
-    Authorization: `Bearer ${provider.apiKey}`,
+    ...(effectiveApiKey ? { Authorization: `Bearer ${effectiveApiKey}` } : {}),
     ...(config?.headers || {}),
   };
 
@@ -673,9 +683,8 @@ export const registerApiRoutes = async (
         throw createApiError("Provider not found", 404, "provider_not_found");
       }
       return {
-        message: `Provider ${
-          request.body.enabled ? "enabled" : "disabled"
-        } successfully`,
+        message: `Provider ${request.body.enabled ? "enabled" : "disabled"
+          } successfully`,
       };
     }
   );

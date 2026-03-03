@@ -93,11 +93,11 @@ export interface UnifiedChatRequest {
   stream?: boolean;
   tools?: UnifiedTool[];
   tool_choice?:
-    | "auto"
-    | "none"
-    | "required"
-    | string
-    | { type: "function"; function: { name: string } };
+  | "auto"
+  | "none"
+  | "required"
+  | string
+  | { type: "function"; function: { name: string } };
   reasoning?: {
     // OpenAI-style
     effort?: ThinkLevel;
@@ -174,9 +174,9 @@ export interface OpenAIChatRequest {
   stream?: boolean;
   tools?: ChatCompletionTool[];
   tool_choice?:
-    | "auto"
-    | "none"
-    | { type: "function"; function: { name: string } };
+  | "auto"
+  | "none"
+  | { type: "function"; function: { name: string } };
 }
 
 // Anthropic 特定类型
@@ -228,6 +228,7 @@ export interface RequestRouteInfo {
 export interface ConfigProvider {
   name: string;
   api_base_url: string;
+  /** api_key can be empty string "" to enable token passthrough via x-api-key header from client */
   api_key: string;
   models: string[];
   transformer: {
