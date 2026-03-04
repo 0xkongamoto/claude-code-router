@@ -357,9 +357,8 @@ async function sendRequestToProvider(
       fastify.log.warn(`[Token Passthrough] Provider '${provider.name}' has empty api_key, but no x-api-key header received from client!`);
     }
   }
-
   const requestHeaders: Record<string, string> = {
-    ...(effectiveApiKey ? { Authorization: `Bearer ${effectiveApiKey}` } : {}),
+    ...(effectiveApiKey ? { Authorization: effectiveApiKey.includes(' ') ? effectiveApiKey : `Bearer ${effectiveApiKey}` } : {}),
     ...(config?.headers || {}),
   };
 
