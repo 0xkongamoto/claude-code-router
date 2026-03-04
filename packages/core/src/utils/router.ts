@@ -145,6 +145,22 @@ const getUseModel = async (
     return { model: req.body.model, scenarioType: 'default' };
   }
 
+  // SFW switcher overrides all scenario routing
+  if (req.switcherResult) {
+    const { classification, confidence } = req.switcherResult
+    if (classification === "sfw" && Router?.sfw) {
+      req.log.info(
+        { classification, confidence, model: Router.sfw },
+        "Switcher: SFW → routing to sfw model"
+      )
+      return { model: Router.sfw, scenarioType: "sfw" as RouterScenarioType }
+    }
+    req.log.info(
+      { classification, confidence, model: Router?.default },
+      "Switcher: NSFW → falling through to default routing"
+    )
+  }
+
   // if tokenCount is greater than the configured threshold, use the long context model
   const longContextThreshold = Router?.longContextThreshold || 60000;
   const lastUsageThreshold =
@@ -196,6 +212,7 @@ const getUseModel = async (
     req.log.info(`Using think model for ${req.body.thinking}`);
     return { model: Router.think, scenarioType: 'think' };
   }
+
   return { model: Router?.default, scenarioType: 'default' };
 };
 
@@ -205,7 +222,7 @@ export interface RouterContext {
   event?: any;
 }
 
-export type RouterScenarioType = 'default' | 'background' | 'think' | 'longContext' | 'webSearch';
+export type RouterScenarioType = 'default' | 'background' | 'think' | 'longContext' | 'webSearch' | 'sfw';
 
 export interface RouterFallbackConfig {
   default?: string[];
@@ -213,6 +230,7 @@ export interface RouterFallbackConfig {
   think?: string[];
   longContext?: string[];
   webSearch?: string[];
+  sfw?: string[];
 }
 
 export const router = async (req: any, _res: any, context: RouterContext) => {

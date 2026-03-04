@@ -16,6 +16,7 @@ import { IAgent, ITool } from "./agents/type";
 import agentsManager from "./agents";
 import { EventEmitter } from "node:events";
 import { pluginManager, tokenSpeedPlugin } from "@musistudio/llms";
+import { Switcher, createSwitcherHook } from "./switcher";
 
 const event = new EventEmitter()
 
@@ -241,6 +242,14 @@ async function getServer(options: RunOptions = {}) {
       }
     }
   });
+
+  // Initialize and register Switcher
+  const switcherConfig = config.Switcher || {}
+  const switcher = new Switcher(switcherConfig, serverInstance.app.log)
+  if (switcher.isEnabled) {
+    serverInstance.addHook("preHandler", createSwitcherHook(switcher))
+  }
+
   serverInstance.addHook("onError", async (request: any, reply: any, error: any) => {
     event.emit('onError', request, reply, error);
   })

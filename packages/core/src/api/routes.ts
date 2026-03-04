@@ -374,6 +374,34 @@ async function sendRequestToProvider(
     }
   }
 
+  // Log outgoing request for debugging
+  const maskedHeaders = { ...requestHeaders };
+  for (const key of Object.keys(maskedHeaders)) {
+    const lk = key.toLowerCase();
+    if (lk === "x-api-key" || lk === "authorization") {
+      const val = maskedHeaders[key] || "";
+      maskedHeaders[key] = val.length > 12
+        ? `${val.substring(0, 8)}...${val.substring(val.length - 4)}`
+        : "***";
+    }
+  }
+  fastify.log.debug(
+    {
+      requestUrl: url.toString(),
+      headers: maskedHeaders,
+      body: {
+        model: requestBody.model,
+        stream: requestBody.stream,
+        messageCount: Array.isArray(requestBody.messages) ? requestBody.messages.length : 0,
+        toolCount: Array.isArray(requestBody.tools) ? requestBody.tools.length : 0,
+        hasSystem: requestBody.system != null,
+        hasThinking: requestBody.thinking != null,
+        maxTokens: requestBody.max_tokens,
+      },
+    },
+    "outgoing request"
+  );
+
   const response = await sendUnifiedRequest(
     url,
     requestBody,

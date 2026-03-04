@@ -113,6 +113,7 @@ export interface RouterConfig {
   longContextThreshold?: number;
   webSearch?: string;
   image?: string;
+  sfw?: string;
   [key: string]: string | number | undefined;
 }
 
