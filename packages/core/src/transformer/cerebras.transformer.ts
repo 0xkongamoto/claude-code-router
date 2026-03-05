@@ -26,12 +26,12 @@ export class CerebrasTransformer implements Transformer {
     } else {
       transformedRequest.disable_reasoning = false
     }
-    
+
     return {
       body: transformedRequest,
       config: {
         headers: {
-          'Authorization': `Bearer ${provider.apiKey}`,
+          'Authorization': provider.apiKey.includes(' ') ? provider.apiKey : `Bearer ${provider.apiKey}`,
           'Content-Type': 'application/json'
         }
       }
@@ -39,7 +39,7 @@ export class CerebrasTransformer implements Transformer {
   }
 
   async transformResponseOut(response: Response): Promise<Response> {
-    
+
     return response;
   }
 }

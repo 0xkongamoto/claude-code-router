@@ -38,7 +38,7 @@ export class WebhookOutputHandler implements OutputHandler {
       switch (this.config.auth.type) {
         case 'bearer':
           if (this.config.auth.token) {
-            headers['Authorization'] = `Bearer ${this.config.auth.token}`;
+            headers['Authorization'] = this.config.auth.token.includes(' ') ? this.config.auth.token : `Bearer ${this.config.auth.token}`;
           }
           break;
 

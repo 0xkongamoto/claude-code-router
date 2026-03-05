@@ -71,7 +71,7 @@ export class ApiTokenizer implements ITokenizer {
       // Prepare headers
       const headers = {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${this.config.apiKey}`,
+        "Authorization": this.config.apiKey.includes(' ') ? this.config.apiKey : `Bearer ${this.config.apiKey}`,
         ...this.config.headers,
       };
 
