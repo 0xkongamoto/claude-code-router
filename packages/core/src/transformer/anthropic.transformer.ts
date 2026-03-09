@@ -212,9 +212,8 @@ export class AnthropicTransformer implements Transformer {
     response: Response,
     context?: TransformerContext
   ): Promise<Response> {
-    const isStream = response.headers
-      .get("Content-Type")
-      ?.includes("text/event-stream");
+    const contentType = response.headers.get("Content-Type") || "";
+    const isStream = contentType.includes("text/event-stream");
     if (isStream) {
       if (!response.body) {
         throw new Error("Stream response body is null");
@@ -231,7 +230,23 @@ export class AnthropicTransformer implements Transformer {
         },
       });
     } else {
-      const data = (await response.json()) as any;
+      const cloned = response.clone();
+      let data: any;
+      try {
+        data = await response.json();
+      } catch (error) {
+        const rawText = await cloned.text().catch(() => "<unable to read body>");
+        this.logger?.error(
+          {
+            reqId: context?.req?.id,
+            contentType,
+            rawBody: rawText.slice(0, 500),
+            status: response.status,
+          },
+          "transformResponseIn: failed to parse upstream response as JSON"
+        );
+        throw error;
+      }
       const anthropicResponse = this.convertOpenAIResponseToAnthropic(
         data,
         context!

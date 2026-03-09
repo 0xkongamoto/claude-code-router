@@ -88,7 +88,8 @@ async function handleTransformerEndpoint(
     );
 
     // Format and return response
-    return formatResponse(finalResponse, reply, body);
+    // Use requestBody (not original body) because transformers may change stream mode
+    return formatResponse(finalResponse, reply, requestBody);
   } catch (error: any) {
     // Handle fallback if error occurs
     if (error.code === 'provider_response_error') {
@@ -182,7 +183,8 @@ async function handleFallback(
       req.log.info(`Fallback model ${fallbackModel} succeeded`);
 
       // Format and return response
-      return formatResponse(finalResponse, reply, newBody);
+      // Use requestBody (not newBody) because transformers may change stream mode
+      return formatResponse(finalResponse, reply, requestBody);
     } catch (fallbackError: any) {
       req.log.warn(`Fallback model ${fallbackModel} failed: ${fallbackError.message}`);
       continue;
@@ -494,7 +496,7 @@ async function processResponseTransformers(
  * Format and return response
  * Handle HTTP status codes, format streaming and regular responses
  */
-function formatResponse(response: any, reply: FastifyReply, body: any) {
+async function formatResponse(response: any, reply: FastifyReply, body: any) {
   // Set HTTP status code
   if (!response.ok) {
     reply.code(response.status);
@@ -508,8 +510,36 @@ function formatResponse(response: any, reply: FastifyReply, body: any) {
     reply.header("Connection", "keep-alive");
     return reply.send(response.body);
   } else {
-    // Handle regular JSON response
-    return response.json();
+    // Check if the response is actually SSE despite stream not being requested
+    const contentType = response.headers?.get?.("Content-Type") || "";
+    if (contentType.includes("text/event-stream")) {
+      reply.log.warn(
+        { contentType, bodyStream: body.stream },
+        "formatResponse: received SSE response for non-stream request, forwarding as stream"
+      );
+      reply.header("Content-Type", "text/event-stream");
+      reply.header("Cache-Control", "no-cache");
+      reply.header("Connection", "keep-alive");
+      return reply.send(response.body);
+    }
+
+    // Handle regular JSON response - clone to safely read text on failure
+    const cloned = response.clone();
+    try {
+      return await response.json();
+    } catch (error) {
+      const rawText = await cloned.text().catch(() => "<unable to read body>");
+      reply.log.error(
+        {
+          contentType,
+          bodyStream: body.stream,
+          rawBody: rawText.slice(0, 500),
+          status: response.status,
+        },
+        "formatResponse: failed to parse response as JSON"
+      );
+      throw error;
+    }
   }
 }
 
