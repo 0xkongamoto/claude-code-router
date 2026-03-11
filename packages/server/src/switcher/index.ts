@@ -1,6 +1,6 @@
 import { LRUCache } from "lru-cache"
 import { parseSwitcherConfig, SwitcherConfig, SwitcherResult } from "./types"
-import { classifyContent, extractLastUserMessage } from "./classifier"
+import { classifyContent, extractAllMessagesText } from "./classifier"
 
 export class Switcher {
   readonly config: SwitcherConfig
@@ -35,9 +35,9 @@ export class Switcher {
   }
 
   async classify(messages: any[]): Promise<SwitcherResult | null> {
-    const content = extractLastUserMessage(messages)
+    const content = extractAllMessagesText(messages)
     if (!content) {
-      this.logger.debug("Switcher: no user message found, skipping")
+      this.logger.debug("Switcher: no text content found in messages, skipping")
       return null
     }
 

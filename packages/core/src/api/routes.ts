@@ -398,6 +398,7 @@ async function sendRequestToProvider(
         hasSystem: requestBody.system != null,
         hasThinking: requestBody.thinking != null,
         maxTokens: requestBody.max_tokens,
+        reasoning: requestBody.reasoning
       },
     },
     "outgoing request"

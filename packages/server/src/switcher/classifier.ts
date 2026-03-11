@@ -13,7 +13,25 @@ interface Message {
   content: string | ContentBlock[]
 }
 
-const CLASSIFIER_PROMPT = `Classify the user message as "sfw" or "nsfw".
+function stripSystemContent(text: string): string {
+  // Remove <system-reminder>...</system-reminder> blocks
+  let stripped = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")
+  // Remove HTML comments (e.g. <!-- speaker:... -->)
+  stripped = stripped.replace(/<!--[\s\S]*?-->/g, "")
+  // Remove <available-deferred-tools>...</available-deferred-tools> blocks
+  stripped = stripped.replace(/<available-deferred-tools>[\s\S]*?<\/available-deferred-tools>/g, "")
+  // Remove <local-command-caveat>...</local-command-caveat> blocks
+  stripped = stripped.replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g, "")
+  // Remove <command-name>...</command-name> and related command tags
+  stripped = stripped.replace(/<command-(?:name|message|args)>[\s\S]*?<\/command-(?:name|message|args)>/g, "")
+  // Remove <local-command-stdout>...</local-command-stdout> blocks
+  stripped = stripped.replace(/<local-command-stdout>[\s\S]*?<\/local-command-stdout>/g, "")
+  // Collapse multiple whitespace/newlines into single newline
+  stripped = stripped.replace(/\n{3,}/g, "\n\n")
+  return stripped.trim()
+}
+
+const CLASSIFIER_PROMPT = `Classify the following conversation as "sfw" or "nsfw".
 
 NSFW = explicit sexual content, graphic violence, hate speech, illegal activities, or inappropriate in a professional environment.
 
@@ -31,7 +49,7 @@ export function extractLastUserMessage(messages: Message[]): string | null {
   }
 
   if (typeof lastMessage.content === "string") {
-    return lastMessage.content
+    return stripSystemContent(lastMessage.content)
   }
 
   if (Array.isArray(lastMessage.content)) {
@@ -40,12 +58,37 @@ export function extractLastUserMessage(messages: Message[]): string | null {
     for (let i = lastMessage.content.length - 1; i >= 0; i--) {
       const block = lastMessage.content[i]
       if (block.type === "text" && typeof block.text === "string") {
-        return block.text
+        const stripped = stripSystemContent(block.text)
+        if (stripped) return stripped
       }
     }
   }
 
   return null
+}
+
+export function extractAllMessagesText(messages: Message[]): string | null {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return null
+  }
+
+  const texts: string[] = []
+  for (const message of messages) {
+    const role = message.role
+    if (typeof message.content === "string") {
+      const stripped = stripSystemContent(message.content)
+      if (stripped) texts.push(`[${role}]: ${stripped}`)
+    } else if (Array.isArray(message.content)) {
+      for (const block of message.content) {
+        if (block.type === "text" && typeof block.text === "string") {
+          const stripped = stripSystemContent(block.text)
+          if (stripped) texts.push(`[${role}]: ${stripped}`)
+        }
+      }
+    }
+  }
+
+  return texts.length > 0 ? texts.join("\n") : null
 }
 
 function hashContent(content: string): string {
@@ -121,7 +164,10 @@ export async function classifyContent(
   logger: any
 ): Promise<SwitcherResult> {
   const startTime = Date.now()
-  const truncated = content.slice(0, config.maxContentLength)
+  // Truncate from the end to keep the most recent (most relevant) content
+  const truncated = content.length > config.maxContentLength
+    ? content.slice(-config.maxContentLength)
+    : content
   const contentHash = hashContent(truncated)
 
   // Check cache

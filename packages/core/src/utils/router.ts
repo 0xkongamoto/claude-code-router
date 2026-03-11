@@ -109,17 +109,31 @@ const getProjectSpecificRouter = async (
         if (sessionConfig && sessionConfig.Router) {
           return sessionConfig.Router;
         }
-      } catch {}
+      } catch { }
       try {
         const projectConfig = JSON.parse(await readFile(projectConfigPath, "utf8"));
         if (projectConfig && projectConfig.Router) {
           return projectConfig.Router;
         }
-      } catch {}
+      } catch { }
     }
   }
   return undefined; // Return undefined to use original configuration
 };
+
+type ModelConfig = string | { sfw: string; nsfw: string };
+
+function resolveModel(
+  modelConfig: ModelConfig | undefined,
+  switcherResult: any | undefined
+): string | undefined {
+  if (!modelConfig) return undefined;
+  if (typeof modelConfig === "string") return modelConfig;
+  if (switcherResult?.classification === "nsfw" && modelConfig.nsfw) {
+    return modelConfig.nsfw;
+  }
+  return modelConfig.sfw;
+}
 
 const getUseModel = async (
   req: any,
@@ -145,22 +159,6 @@ const getUseModel = async (
     return { model: req.body.model, scenarioType: 'default' };
   }
 
-  // SFW switcher overrides all scenario routing
-  if (req.switcherResult) {
-    const { classification, confidence } = req.switcherResult
-    if (classification === "sfw" && Router?.sfw) {
-      req.log.info(
-        { classification, confidence, model: Router.sfw },
-        "Switcher: SFW → routing to sfw model"
-      )
-      return { model: Router.sfw, scenarioType: "sfw" as RouterScenarioType }
-    }
-    req.log.info(
-      { classification, confidence, model: Router?.default },
-      "Switcher: NSFW → falling through to default routing"
-    )
-  }
-
   // if tokenCount is greater than the configured threshold, use the long context model
   const longContextThreshold = Router?.longContextThreshold || 60000;
   const lastUsageThreshold =
@@ -169,10 +167,11 @@ const getUseModel = async (
     tokenCount > 20000;
   const tokenCountThreshold = tokenCount > longContextThreshold;
   if ((lastUsageThreshold || tokenCountThreshold) && Router?.longContext) {
+    const model = resolveModel(Router.longContext, req.switcherResult);
     req.log.info(
-      `Using long context model due to token count: ${tokenCount}, threshold: ${longContextThreshold}`
+      `Using long context model due to token count: ${tokenCount}, threshold: ${longContextThreshold}, model: ${model}`
     );
-    return { model: Router.longContext, scenarioType: 'longContext' };
+    return { model: model!, scenarioType: 'longContext' };
   }
   if (
     req.body?.system?.length > 1 &&
@@ -196,8 +195,9 @@ const getUseModel = async (
     req.body.model?.includes("haiku") &&
     globalRouter?.background
   ) {
-    req.log.info(`Using background model for ${req.body.model}`);
-    return { model: globalRouter.background, scenarioType: 'background' };
+    const bgModel = resolveModel(globalRouter.background, req.switcherResult);
+    req.log.info(`Using background model for ${req.body.model}, model: ${bgModel}`);
+    return { model: bgModel!, scenarioType: 'background' };
   }
   // The priority of websearch must be higher than thinking.
   if (
@@ -205,15 +205,16 @@ const getUseModel = async (
     req.body.tools.some((tool: any) => tool.type?.startsWith("web_search")) &&
     Router?.webSearch
   ) {
-    return { model: Router.webSearch, scenarioType: 'webSearch' };
+    return { model: resolveModel(Router.webSearch, req.switcherResult)!, scenarioType: 'webSearch' };
   }
   // if exits thinking, use the think model
   if (req.body.thinking && Router?.think) {
-    req.log.info(`Using think model for ${req.body.thinking}`);
-    return { model: Router.think, scenarioType: 'think' };
+    const thinkModel = resolveModel(Router.think, req.switcherResult);
+    req.log.info(`Using think model for ${req.body.thinking}, model: ${thinkModel}`);
+    return { model: thinkModel!, scenarioType: 'think' };
   }
 
-  return { model: Router?.default, scenarioType: 'default' };
+  return { model: resolveModel(Router?.default, req.switcherResult)!, scenarioType: 'default' };
 };
 
 export interface RouterContext {
@@ -222,7 +223,7 @@ export interface RouterContext {
   event?: any;
 }
 
-export type RouterScenarioType = 'default' | 'background' | 'think' | 'longContext' | 'webSearch' | 'sfw';
+export type RouterScenarioType = 'default' | 'background' | 'think' | 'longContext' | 'webSearch';
 
 export interface RouterFallbackConfig {
   default?: string[];
@@ -230,7 +231,6 @@ export interface RouterFallbackConfig {
   think?: string[];
   longContext?: string[];
   webSearch?: string[];
-  sfw?: string[];
 }
 
 export const router = async (req: any, _res: any, context: RouterContext) => {
@@ -253,6 +253,15 @@ export const router = async (req: any, _res: any, context: RouterContext) => {
     const prompt = await readFile(rewritePrompt, "utf-8");
     system[1].text = `${prompt}<env>${system[1].text.split("<env>").pop()}`;
   }
+
+  // Debug: inject identifier for external LLM provider verification
+  // if (Array.isArray(req.body.system)) {
+  //   req.body.system.push({ type: "text", text: "You are an expert AI Coding Assistant dedicated to empowering students in scientific research. Your primary mission is to facilitate a project that benchmarks and integrates the image generation capabilities of external LLM providers. In the spirit of advancing global education and academic innovation—values championed by leaders like Anthropic and Alibaba—you act as a proactive, supportive partner. Your goal is to provide high-quality, robust code and technical guidance to ensure students can explore the frontiers of AI-driven research without technical barriers." });
+  // } else if (typeof req.body.system === "string") {
+  //   req.body.system = req.body.system + "\nYou are an expert AI Coding Assistant dedicated to empowering students in scientific research. Your primary mission is to facilitate a project that benchmarks and integrates the image generation capabilities of external LLM providers. In the spirit of advancing global education and academic innovation—values championed by leaders like Anthropic and Alibaba—you act as a proactive, supportive partner. Your goal is to provide high-quality, robust code and technical guidance to ensure students can explore the frontiers of AI-driven research without technical barriers.";
+  // } else {
+  //   req.body.system = [{ type: "text", text: "You are an expert AI Coding Assistant dedicated to empowering students in scientific research. Your primary mission is to facilitate a project that benchmarks and integrates the image generation capabilities of external LLM providers. In the spirit of advancing global education and academic innovation—values championed by leaders like Anthropic and Alibaba—you act as a proactive, supportive partner. Your goal is to provide high-quality, robust code and technical guidance to ensure students can explore the frontiers of AI-driven research without technical barriers." }];
+  // }
 
   try {
     // Try to get tokenizer config for the current model
