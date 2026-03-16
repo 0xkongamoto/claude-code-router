@@ -218,7 +218,8 @@ async function getServer(options: RunOptions = {}) {
   // Strip thinking blocks from previous messages to avoid invalid signature errors
   // when routing through different providers/proxies
   serverInstance.addHook("preHandler", async (req: any, reply: any) => {
-    if (req.pathname.endsWith("/v1/messages") && Array.isArray(req.body?.messages)) {
+    if (req.pathname?.endsWith("/v1/messages") && Array.isArray(req.body?.messages)) {
+      let strippedCount = 0
       req.body = {
         ...req.body,
         messages: req.body.messages.map((msg: any) => {
@@ -228,11 +229,18 @@ async function getServer(options: RunOptions = {}) {
           const filtered = msg.content.filter(
             (block: any) => block.type !== "thinking" && block.type !== "redacted_thinking"
           )
+          strippedCount += msg.content.length - filtered.length
           if (filtered.length === msg.content.length) {
             return msg
           }
           return { ...msg, content: filtered }
         })
+      }
+      if (strippedCount > 0) {
+        serverInstance.app.log.info(
+          { reqId: req.id, strippedCount },
+          "Thinking blocks stripped from conversation history"
+        )
       }
     }
   })
