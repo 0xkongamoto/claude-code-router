@@ -1,0 +1,287 @@
+import { LRUCache } from "lru-cache"
+import { ContentClassification, SanitizerModelConfig, SanitizerResult } from "../switcher/types"
+import { hashContent, extractAllMessagesText, extractLastUserMessage } from "../switcher/classifier"
+
+const SANITIZER_PROMPT = `You are a content decomposition engine. Analyze the following message and:
+
+1. Classify it as "sfw", "nsfw", or "mixed"
+   - sfw: appropriate for professional environments
+   - nsfw: contains explicit sexual content, graphic violence, hate speech, or illegal activities
+   - mixed: contains both coding/technical requests AND nsfw elements
+
+2. If nsfw or mixed: create a clean version of the prompt where all NSFW elements are replaced with descriptive placeholders. The clean prompt should be a valid, complete coding request that a coding AI can implement.
+
+3. Provide an nsfwSpec that maps each placeholder to what it should contain.
+
+Placeholder naming convention — use descriptive names with categories:
+  {{NSFW_<CATEGORY>_<DESCRIPTION>}}
+  Categories: LABEL (UI text), DIALOGUE (speech/reactions), PROMPT (image prompts),
+  STATE (state names/transitions), LOGIC (conditional expressions), STYLE (CSS),
+  CONFIG (numbers/flags)
+  Examples: {{NSFW_LABEL_GAME_TITLE}}, {{NSFW_DIALOGUE_WIN_ROUND_3}},
+  {{NSFW_STATE_LABELS}}, {{NSFW_LOGIC_REVEAL_CONDITION}}
+  NEVER use generic names like {{NSFW_1}} or {{P1}}.
+
+Reply with ONLY this JSON, nothing else:
+{
+  "classification": "sfw|nsfw|mixed",
+  "confidence": 0.95,
+  "cleanPrompt": "The sanitized prompt with {{NSFW_CATEGORY_DESC}} placeholders, or null if sfw",
+  "nsfwSpec": {
+    "contentChanges": [
+      {"file": "target file path", "path": "element path in file", "description": "what NSFW content to place here"}
+    ],
+    "codeChanges": [
+      {"type": "string|logic|style|config", "placeholder": "{{NSFW_LABEL_GAME_TITLE}}", "description": "the actual NSFW content this replaces", "location": "where in the code this appears"}
+    ],
+    "context": "brief description of the overall NSFW theme"
+  }
+}
+
+If the content is sfw, respond with:
+{"classification":"sfw","confidence":0.95,"cleanPrompt":null,"nsfwSpec":null}`
+
+function extractJson(text: string): string | null {
+  const startIdx = text.indexOf('"classification"')
+  if (startIdx === -1) return null
+
+  // Walk backwards to find the opening brace
+  let braceStart = -1
+  for (let i = startIdx - 1; i >= 0; i--) {
+    if (text[i] === "{") { braceStart = i; break }
+  }
+  if (braceStart === -1) return null
+
+  // Walk forward with brace depth to find the matching close
+  let depth = 0
+  for (let i = braceStart; i < text.length; i++) {
+    if (text[i] === "{") depth++
+    else if (text[i] === "}") depth--
+    if (depth === 0) return text.slice(braceStart, i + 1)
+  }
+  return null
+}
+
+function validateNsfwSpec(raw: any): SanitizerResult["nsfwSpec"] {
+  if (!raw || typeof raw !== "object") return null
+  return {
+    contentChanges: Array.isArray(raw.contentChanges)
+      ? raw.contentChanges.filter(
+          (c: any) =>
+            typeof c.file === "string" &&
+            typeof c.path === "string" &&
+            typeof c.description === "string"
+        )
+      : [],
+    codeChanges: Array.isArray(raw.codeChanges)
+      ? raw.codeChanges.filter(
+          (c: any) =>
+            typeof c.placeholder === "string" &&
+            typeof c.description === "string"
+        )
+      : [],
+    context: typeof raw.context === "string" ? raw.context : "",
+  }
+}
+
+function parseClassification(value: any): ContentClassification {
+  if (value === "nsfw") return "nsfw"
+  if (value === "mixed") return "mixed"
+  return "sfw"
+}
+
+function parseSanitizerResponse(
+  responseText: string,
+  logger: any
+): {
+  classification: ContentClassification
+  confidence: number
+  cleanPrompt: string | null
+  nsfwSpec: SanitizerResult["nsfwSpec"]
+} {
+  const fallback = {
+    classification: "sfw" as ContentClassification,
+    confidence: 0,
+    cleanPrompt: null,
+    nsfwSpec: null,
+  }
+
+  // Direct parse
+  try {
+    const parsed = JSON.parse(responseText)
+    if (parsed.classification) {
+      return {
+        classification: parseClassification(parsed.classification),
+        confidence: typeof parsed.confidence === "number"
+          ? Math.max(0, Math.min(1, parsed.confidence))
+          : 0.5,
+        cleanPrompt: typeof parsed.cleanPrompt === "string" ? parsed.cleanPrompt : null,
+        nsfwSpec: validateNsfwSpec(parsed.nsfwSpec),
+      }
+    }
+  } catch {
+    // Direct parse failed
+  }
+
+  // Extract JSON from surrounding text
+  const jsonStr = extractJson(responseText)
+  if (jsonStr) {
+    try {
+      const parsed = JSON.parse(jsonStr)
+      return {
+        classification: parseClassification(parsed.classification),
+        confidence: typeof parsed.confidence === "number"
+          ? Math.max(0, Math.min(1, parsed.confidence))
+          : 0.5,
+        cleanPrompt: typeof parsed.cleanPrompt === "string" ? parsed.cleanPrompt : null,
+        nsfwSpec: validateNsfwSpec(parsed.nsfwSpec),
+      }
+    } catch {
+      logger.warn(
+        { extracted: jsonStr },
+        "Sanitizer: extracted JSON but failed to parse"
+      )
+    }
+  }
+
+  // Keyword fallback
+  const lower = responseText.toLowerCase()
+  if (lower.includes('"nsfw"') || lower.includes("'nsfw'")) {
+    logger.warn(
+      { responseText },
+      "Sanitizer: JSON parse failed, detected nsfw keyword"
+    )
+    return { classification: "nsfw", confidence: 0.5, cleanPrompt: null, nsfwSpec: null }
+  }
+  if (lower.includes('"mixed"') || lower.includes("'mixed'")) {
+    logger.warn(
+      { responseText },
+      "Sanitizer: JSON parse failed, detected mixed keyword"
+    )
+    return { classification: "mixed", confidence: 0.5, cleanPrompt: null, nsfwSpec: null }
+  }
+
+  logger.warn(
+    { responseText },
+    "Sanitizer: could not parse response, using sfw fallback"
+  )
+  return fallback
+}
+
+export async function sanitizeContent(
+  content: string,
+  config: SanitizerModelConfig,
+  cache: LRUCache<string, SanitizerResult> | null,
+  logger: any
+): Promise<SanitizerResult> {
+  const startTime = Date.now()
+
+  // Truncate from the end to keep the most recent content
+  const truncated = content.length > config.maxContentLength
+    ? content.slice(-config.maxContentLength)
+    : content
+  const contentHash = hashContent(truncated)
+
+  // Check cache
+  if (cache) {
+    const cached = cache.get(contentHash)
+    if (cached) {
+      logger.debug(
+        { contentHash, classification: cached.originalClassification },
+        "Sanitizer: cache hit"
+      )
+      return { ...cached, cached: true, latencyMs: Date.now() - startTime }
+    }
+  }
+
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), config.timeoutMs)
+
+    const response = await fetch(config.apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": config.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: config.model,
+        max_tokens: 2048,
+        messages: [
+          {
+            role: "user",
+            content: `${SANITIZER_PROMPT}\n\nMessage:\n${truncated}`,
+          },
+        ],
+      }),
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeout)
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "unknown")
+      logger.error(
+        { status: response.status, body: errorBody },
+        "Sanitizer: API error"
+      )
+      return {
+        classification: "sfw",
+        originalClassification: "sfw",
+        confidence: 0,
+        cached: false,
+        latencyMs: Date.now() - startTime,
+        cleanPrompt: null,
+        nsfwSpec: null,
+      }
+    }
+
+    const data = await response.json() as any
+    const responseText = data?.content?.[0]?.text || ""
+
+    logger.debug({ rawResponse: responseText }, "Sanitizer: raw response")
+
+    const parsed = parseSanitizerResponse(responseText, logger)
+
+    const result: SanitizerResult = {
+      classification: parsed.classification,
+      originalClassification: parsed.classification,
+      confidence: parsed.confidence,
+      cached: false,
+      latencyMs: Date.now() - startTime,
+      cleanPrompt: parsed.cleanPrompt,
+      nsfwSpec: parsed.nsfwSpec,
+    }
+
+    if (cache) {
+      cache.set(contentHash, result)
+    }
+
+    return result
+  } catch (error: any) {
+    if (error.name === "AbortError") {
+      logger.warn(
+        { timeoutMs: config.timeoutMs },
+        "Sanitizer: request timed out"
+      )
+    } else {
+      logger.error(
+        { error: error.message },
+        "Sanitizer: request failed"
+      )
+    }
+
+    return {
+      classification: "sfw",
+      originalClassification: "sfw",
+      confidence: 0,
+      cached: false,
+      latencyMs: Date.now() - startTime,
+      cleanPrompt: null,
+      nsfwSpec: null,
+    }
+  }
+}
+
+export { extractAllMessagesText, extractLastUserMessage }

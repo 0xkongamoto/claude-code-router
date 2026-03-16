@@ -6,7 +6,9 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "node ../../scripts/build-server.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [
     "claude",
@@ -36,6 +38,7 @@
     "esbuild": "^0.25.1",
     "fastify": "^5.4.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "vitest": "^4.1.0"
   }
 }

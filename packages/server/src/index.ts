@@ -17,6 +17,12 @@ import agentsManager from "./agents";
 import { EventEmitter } from "node:events";
 import { pluginManager, tokenSpeedPlugin } from "@musistudio/llms";
 import { Switcher, createSwitcherHook } from "./switcher";
+import { Sanitizer, createSanitizerHook } from "./sanitizer";
+import { PipelineStore } from "./sanitizer/store";
+import { ReportAccumulator } from "./sanitizer/report";
+import { NsfwFillService } from "./sanitizer/fill";
+import { ApplyService } from "./sanitizer/apply";
+import { ResponseAccumulator } from "./utils/ResponseAccumulator";
 
 const event = new EventEmitter()
 
@@ -209,6 +215,28 @@ async function getServer(options: RunOptions = {}) {
     }
   })
 
+  // Strip thinking blocks from previous messages to avoid invalid signature errors
+  // when routing through different providers/proxies
+  serverInstance.addHook("preHandler", async (req: any, reply: any) => {
+    if (req.pathname.endsWith("/v1/messages") && Array.isArray(req.body?.messages)) {
+      req.body = {
+        ...req.body,
+        messages: req.body.messages.map((msg: any) => {
+          if (msg.role !== "assistant" || !Array.isArray(msg.content)) {
+            return msg
+          }
+          const filtered = msg.content.filter(
+            (block: any) => block.type !== "thinking" && block.type !== "redacted_thinking"
+          )
+          if (filtered.length === msg.content.length) {
+            return msg
+          }
+          return { ...msg, content: filtered }
+        })
+      }
+    }
+  })
+
   serverInstance.addHook("preHandler", async (req: any, reply: any) => {
     if (req.pathname.endsWith("/v1/messages")) {
       const useAgents = []
@@ -243,22 +271,108 @@ async function getServer(options: RunOptions = {}) {
     }
   });
 
-  // Initialize and register Switcher
+  // Pipeline mode: Sanitizer replaces Switcher (does classification + decomposition)
+  // Legacy mode: Switcher does classification only
+  const pipelineConfig = config.Pipeline || {}
   const switcherConfig = config.Switcher || {}
-  const switcher = new Switcher(switcherConfig, serverInstance.app.log)
-  if (switcher.isEnabled) {
-    serverInstance.addHook("preHandler", createSwitcherHook(switcher))
+  const sanitizer = new Sanitizer(
+    pipelineConfig,
+    serverInstance.app.log,
+    switcherConfig.classifierApiKey
+  )
+
+  const pipelineStore = sanitizer.isEnabled
+    ? new PipelineStore(
+        sanitizer.config.sfwAgent.storeMaxSize,
+        sanitizer.config.sfwAgent.storeTtlMs,
+        serverInstance.app.log
+      )
+    : null
+
+  const fillService = sanitizer.isEnabled
+    ? new NsfwFillService(sanitizer.config.nsfwAgent, serverInstance.app.log)
+    : null
+
+  const applyService = sanitizer.isEnabled
+    ? new ApplyService(sanitizer.config.apply, serverInstance.app.log)
+    : null
+
+  if (sanitizer.isEnabled) {
+    serverInstance.addHook("preHandler", createSanitizerHook(sanitizer, pipelineStore, serverInstance.app.log))
+  } else {
+    const switcher = new Switcher(switcherConfig, serverInstance.app.log)
+    if (switcher.isEnabled) {
+      serverInstance.addHook("preHandler", createSwitcherHook(switcher))
+    }
   }
 
   serverInstance.addHook("onError", async (request: any, reply: any, error: any) => {
     event.emit('onError', request, reply, error);
   })
   serverInstance.addHook("onSend", (req: any, reply: any, payload: any, done: any) => {
+    const relation_id = { reqId: req.id, sessionId: req.sessionId || null }
+
     if (req.sessionId && req.pathname.endsWith("/v1/messages")) {
       if (payload instanceof ReadableStream) {
+        const [processingStream, loggingStream] = payload.tee()
+        new ResponseAccumulator().accumulate(loggingStream).then(
+          (response) => {
+            serverInstance.app.log.debug(
+              { relation_id, response, type: "assembled_response" },
+              "Response complete"
+            )
+          }
+        ).catch(() => {})
+
+        // Pipeline: extract implementation report from streaming response
+        if (req.sanitizerResult && pipelineStore && !req.agents) {
+          const [originalStream, extractionStream] = processingStream.tee()
+
+          const accumulator = new ReportAccumulator(sanitizer.config.sfwAgent)
+          const extractReport = async (stream: ReadableStream) => {
+            const parsed = stream.pipeThrough(new SSEParserTransform())
+            const reader = parsed.getReader()
+            try {
+              while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
+                if (
+                  value?.data?.delta?.type === "text_delta" &&
+                  typeof value.data.delta.text === "string"
+                ) {
+                  const report = accumulator.addChunk(value.data.delta.text)
+                  if (report && req.sessionId) {
+                    pipelineStore.setReport(req.sessionId, report)
+                    break
+                  }
+                }
+                if (value?.event === "message_delta" && value?.data?.usage) {
+                  sessionUsageCache.put(req.sessionId, value.data.usage)
+                }
+              }
+            } catch (err: any) {
+              if (err.name !== "AbortError" && err.code !== "ERR_STREAM_PREMATURE_CLOSE") {
+                serverInstance.app.log.error(
+                  { relation_id, error: err.message },
+                  "Pipeline: report extraction error"
+                )
+              }
+            } finally {
+              reader.releaseLock()
+            }
+          }
+          extractReport(extractionStream).catch((err: any) => {
+            serverInstance.app.log.error(
+              { relation_id, error: err.message },
+              "Pipeline: unexpected report extraction error"
+            )
+          })
+          return done(null, originalStream)
+        }
+
         if (req.agents) {
           const abortController = new AbortController();
-          const eventStream = payload.pipeThrough(new SSEParserTransform())
+          const eventStream = processingStream.pipeThrough(new SSEParserTransform())
           let currentAgent: undefined | IAgent;
           let currentToolIndex = -1
           let currentToolName = ''
@@ -383,7 +497,7 @@ async function getServer(options: RunOptions = {}) {
           }).pipeThrough(new SSESerializerTransform()))
         }
 
-        const [originalStream, clonedStream] = payload.tee();
+        const [originalStream, clonedStream] = processingStream.tee();
         const read = async (stream: ReadableStream) => {
           const reader = stream.getReader();
           try {
@@ -414,6 +528,10 @@ async function getServer(options: RunOptions = {}) {
         read(clonedStream);
         return done(null, originalStream)
       }
+      serverInstance.app.log.debug(
+        { relation_id, response: payload, type: "assembled_response" },
+        "Response complete"
+      )
       sessionUsageCache.put(req.sessionId, payload.usage);
       if (typeof payload ==='object') {
         if (payload.error) {
@@ -441,6 +559,115 @@ async function getServer(options: RunOptions = {}) {
   process.on("unhandledRejection", (reason, promise) => {
     serverInstance.app.log.error("Unhandled rejection at:", promise, "reason:", reason);
   });
+
+  // Pipeline API endpoints
+  if (pipelineStore) {
+    serverInstance.app.get("/api/pipeline", async () => {
+      return { sessions: pipelineStore.listSessions() }
+    })
+
+    serverInstance.app.get("/api/pipeline/:sessionId", async (req: any, reply: any) => {
+      const state = pipelineStore.getSession(req.params.sessionId)
+      if (!state) return reply.status(404).send({ error: "Session not found" })
+      return state
+    })
+
+    serverInstance.app.post("/api/pipeline/:sessionId/fill", async (req: any, reply: any) => {
+      const { sessionId } = req.params
+      const state = pipelineStore.getSession(sessionId)
+      if (!state) return reply.status(404).send({ error: "Session not found" })
+      if (state.status !== "sfw_complete") {
+        return reply.status(400).send({
+          error: `Status is "${state.status}", need "sfw_complete"`,
+        })
+      }
+      if (!state.nsfwSpec || !state.implementationReport) {
+        return reply.status(400).send({ error: "Missing nsfwSpec or implementationReport" })
+      }
+      if (!fillService) {
+        return reply.status(503).send({ error: "NSFW fill service not configured" })
+      }
+
+      pipelineStore.setStatus(sessionId, "nsfw_pending")
+
+      const { nsfwSpec, implementationReport } = state
+
+      ;(async () => {
+        pipelineStore.setStatus(sessionId, "nsfw_in_progress")
+        try {
+          const fillResult = await fillService.executeFill(nsfwSpec, implementationReport)
+          pipelineStore.setFillResult(sessionId, fillResult)
+        } catch (error: any) {
+          const errorMsg = error.kind
+            ? `[${error.kind}] ${error.message}`
+            : error.message
+          serverInstance.app.log.error(
+            { sessionId, error: errorMsg, kind: error.kind },
+            "Pipeline: NSFW fill failed (all retries exhausted)"
+          )
+          pipelineStore.setStatus(sessionId, "error", errorMsg)
+        }
+      })()
+
+      return {
+        message: "NSFW fill started",
+        placeholderCount: implementationReport.placeholders.length,
+        status: "nsfw_pending",
+        pollUrl: `/api/pipeline/${sessionId}`,
+      }
+    })
+
+    serverInstance.app.post("/api/pipeline/:sessionId/apply", async (req: any, reply: any) => {
+      const { sessionId } = req.params
+      const { projectPath } = req.body || {}
+
+      if (!projectPath || typeof projectPath !== "string") {
+        return reply.status(400).send({ error: "Missing or invalid projectPath in request body" })
+      }
+
+      const state = pipelineStore.getSession(sessionId)
+      if (!state) return reply.status(404).send({ error: "Session not found" })
+      if (state.status !== "nsfw_complete") {
+        return reply.status(400).send({
+          error: `Status is "${state.status}", need "nsfw_complete"`,
+        })
+      }
+      if (!state.fillResult) {
+        return reply.status(400).send({ error: "Missing fillResult" })
+      }
+      if (!applyService) {
+        return reply.status(503).send({ error: "Apply service not configured" })
+      }
+
+      pipelineStore.setStatus(sessionId, "apply_pending")
+      const { fillResult } = state
+
+      ;(async () => {
+        pipelineStore.setStatus(sessionId, "apply_in_progress")
+        try {
+          const applyResult = await applyService.executeApply(fillResult, projectPath)
+          pipelineStore.setApplyResult(sessionId, applyResult)
+        } catch (error: any) {
+          const errorMsg = error.kind
+            ? `[${error.kind}] ${error.message}`
+            : error.message
+          serverInstance.app.log.error(
+            { sessionId, error: errorMsg, kind: error.kind },
+            "Pipeline: apply failed"
+          )
+          pipelineStore.setStatus(sessionId, "error", errorMsg)
+        }
+      })()
+
+      return {
+        message: "Apply started",
+        editCount: fillResult.edits.length,
+        contentFileCount: fillResult.contentFiles.length,
+        status: "apply_pending",
+        pollUrl: `/api/pipeline/${sessionId}`,
+      }
+    })
+  }
 
   return serverInstance;
 }

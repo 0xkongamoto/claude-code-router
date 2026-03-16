@@ -13,7 +13,7 @@ interface Message {
   content: string | ContentBlock[]
 }
 
-function stripSystemContent(text: string): string {
+export function stripSystemContent(text: string): string {
   // Remove <system-reminder>...</system-reminder> blocks
   let stripped = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")
   // Remove HTML comments (e.g. <!-- speaker:... -->)
@@ -91,7 +91,7 @@ export function extractAllMessagesText(messages: Message[]): string | null {
   return texts.length > 0 ? texts.join("\n") : null
 }
 
-function hashContent(content: string): string {
+export function hashContent(content: string): string {
   return createHash("sha256").update(content).digest("hex")
 }
 
