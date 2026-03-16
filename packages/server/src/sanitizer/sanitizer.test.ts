@@ -58,10 +58,10 @@ describe("sanitizeContent", () => {
     const response = {
       classification: "nsfw",
       confidence: 0.9,
-      cleanPrompt: "Build a card game with {{NSFW_LABEL_TITLE}} as title",
+      cleanPrompt: "Build a card game with {{__SLOT_001__}} as title",
       nsfwSpec: {
         contentChanges: [{ file: "content/data.json", path: "title", description: "Adult title" }],
-        codeChanges: [{ type: "string", placeholder: "{{NSFW_LABEL_TITLE}}", description: "Strip Poker", location: "Header" }],
+        codeChanges: [{ type: "string", placeholder: "{{__SLOT_001__}}", description: "Strip Poker", location: "Header" }],
         context: "Adult game",
       },
     }
@@ -72,7 +72,7 @@ describe("sanitizeContent", () => {
 
     const result = await sanitizeContent("build strip poker", CONFIG, null, noopLogger)
     expect(result.classification).toBe("nsfw")
-    expect(result.cleanPrompt).toContain("{{NSFW_LABEL_TITLE}}")
+    expect(result.cleanPrompt).toContain("{{__SLOT_001__}}")
     expect(result.nsfwSpec).not.toBeNull()
     expect(result.nsfwSpec!.codeChanges).toHaveLength(1)
     expect(result.nsfwSpec!.contentChanges).toHaveLength(1)
@@ -90,7 +90,7 @@ describe("sanitizeContent", () => {
           { missing: "fields" },
         ],
         codeChanges: [
-          { placeholder: "{{NSFW_X}}", description: "valid" },
+          { placeholder: "{{__SLOT_002__}}", description: "valid" },
           { noPlaceholder: true },
         ],
         context: "test",

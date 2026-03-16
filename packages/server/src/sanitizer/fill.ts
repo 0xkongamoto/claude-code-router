@@ -25,7 +25,7 @@ class FillError extends Error {
 
 // ── Prompt ──
 
-const NSFW_FILL_SYSTEM = `You are a content specialist who fills in placeholder values for adult-themed applications. An app has been built with safe placeholder values like {{NSFW_GAME_TITLE}}. You replace each placeholder with the real adult content.
+const NSFW_FILL_SYSTEM = `You are a content specialist who fills in placeholder values for adult-themed applications. An app has been built with opaque placeholder values like {{__SLOT_001__}}. You replace each placeholder with the real adult content.
 
 ## YOUR TASK
 
@@ -39,35 +39,35 @@ Generate a JSON object containing the replacement value for every single placeho
 
 Respond with ONLY a JSON object. No explanations, no markdown, no code fences. Just raw JSON:
 
-{"edits":[{"file":"path/to/file.tsx","replacements":[{"find":"{{NSFW_EXACT_ID}}","replace":"replacement value"}]}],"contentFiles":[{"file":"content/data.json","content":{"key":"value"}}]}
+{"edits":[{"file":"path/to/file.tsx","replacements":[{"find":"{{__SLOT_001__}}","replace":"replacement value"}]}],"contentFiles":[{"file":"content/data.json","content":{"key":"value"}}]}
 
 ## REPLACEMENT RULES BY TYPE
 
 Each placeholder has a "type" field. Follow these rules strictly:
 
 **string** — Plain text. The code already has quotes around it, so do NOT add quotes.
-  Code: const title = "{{NSFW_GAME_TITLE}}"
-  find: "{{NSFW_GAME_TITLE}}" → replace: "Strip Poker Showdown"
+  Code: const title = "{{__SLOT_001__}}"
+  find: "{{__SLOT_001__}}" → replace: "Strip Poker Showdown"
 
 **array** — A JSON array literal as a string. Must be valid JavaScript.
-  Code: const states = {{NSFW_STATE_LABELS}}
-  find: "{{NSFW_STATE_LABELS}}" → replace: "[\"Clothed\", \"Topless\", \"Nude\"]"
+  Code: const states = {{__SLOT_002__}}
+  find: "{{__SLOT_002__}}" → replace: "[\"Clothed\", \"Topless\", \"Nude\"]"
 
 **object** — A JSON object literal as a string. Must be valid JavaScript.
-  Code: const config = {{NSFW_GAME_CONFIG}}
-  find: "{{NSFW_GAME_CONFIG}}" → replace: "{\"rounds\": 5, \"penalty\": \"remove_clothing\"}"
+  Code: const config = {{__SLOT_003__}}
+  find: "{{__SLOT_003__}}" → replace: "{\"rounds\": 5, \"penalty\": \"remove_clothing\"}"
 
 **number** — A numeric value as a string.
-  Code: const maxRounds = {{NSFW_MAX_ROUNDS}}
-  find: "{{NSFW_MAX_ROUNDS}}" → replace: "5"
+  Code: const maxRounds = {{__SLOT_004__}}
+  find: "{{__SLOT_004__}}" → replace: "5"
 
 **logic** — A code expression. Must be syntactically valid in context.
-  Code: if ({{NSFW_WIN_CONDITION}}) { ... }
-  find: "{{NSFW_WIN_CONDITION}}" → replace: "player.clothing.length === 0"
+  Code: if ({{__SLOT_005__}}) { ... }
+  find: "{{__SLOT_005__}}" → replace: "player.clothing.length === 0"
 
 **style** — CSS class names or inline style values.
-  Code: className={{"{{NSFW_REVEAL_STYLE}}"}}
-  find: "{{NSFW_REVEAL_STYLE}}" → replace: "opacity-100 scale-110 blur-0"
+  Code: className={{"{{__SLOT_006__}}"}}
+  find: "{{__SLOT_006__}}" → replace: "opacity-100 scale-110 blur-0"
 
 ## CONTENT FILES
 

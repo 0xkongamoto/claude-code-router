@@ -46,7 +46,7 @@ const SCANNABLE_EXTS = new Set(["ts", "tsx", "js", "jsx", "json", "md", "css", "
 
 // ── Placeholder regex ──
 
-const PLACEHOLDER_RE = /\{\{NSFW_[A-Z0-9_]+\}\}/g
+const PLACEHOLDER_RE = /\{\{__SLOT_[0-9]{3}__\}\}/g
 
 export class ApplyService {
   private readonly config: ApplyConfig

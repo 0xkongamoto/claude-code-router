@@ -12,7 +12,7 @@ const CONFIG: SfwAgentConfig = {
 const VALID_REPORT = JSON.stringify({
   summary: "Test app",
   files: [{ path: "src/app.ts", action: "created", purpose: "Main app", linesOfCode: 50 }],
-  placeholders: [{ id: "{{NSFW_TITLE}}", file: "src/app.ts", line: 1, type: "string", currentValue: "{{NSFW_TITLE}}", context: "title" }],
+  placeholders: [{ id: "{{__SLOT_001__}}", file: "src/app.ts", line: 1, type: "string", currentValue: "{{__SLOT_001__}}", context: "title" }],
   contentFiles: [],
   buildStatus: "success",
   techStack: ["react"],
@@ -26,7 +26,7 @@ describe("ReportAccumulator", () => {
     expect(result).not.toBeNull()
     expect(result!.summary).toBe("Test app")
     expect(result!.placeholders).toHaveLength(1)
-    expect(result!.placeholders[0].id).toBe("{{NSFW_TITLE}}")
+    expect(result!.placeholders[0].id).toBe("{{__SLOT_001__}}")
   })
 
   it("extracts report split across multiple chunks", () => {
@@ -70,7 +70,7 @@ describe("ReportAccumulator", () => {
       summary: "Test",
       files: [],
       placeholders: [
-        { id: "{{NSFW_A}}", file: "a.ts", line: 1, type: "string", currentValue: "x", context: "y" },
+        { id: "{{__SLOT_002__}}", file: "a.ts", line: 1, type: "string", currentValue: "x", context: "y" },
         { id: null, file: "b.ts" },
         { missing: "fields" },
       ],
@@ -82,7 +82,7 @@ describe("ReportAccumulator", () => {
     const result = acc.addChunk(`<<<REPORT>>>${report}<<<END_REPORT>>>`)
     expect(result).not.toBeNull()
     expect(result!.placeholders).toHaveLength(1)
-    expect(result!.placeholders[0].id).toBe("{{NSFW_A}}")
+    expect(result!.placeholders[0].id).toBe("{{__SLOT_002__}}")
   })
 
   it("returns null when all placeholders are invalid", () => {
@@ -108,7 +108,7 @@ describe("ReportAccumulator", () => {
         { path: "a.ts", action: "created", purpose: "x", linesOfCode: 10 },
         { noPath: true },
       ],
-      placeholders: [{ id: "{{NSFW_A}}", file: "a.ts", line: 1, type: "string", currentValue: "x", context: "y" }],
+      placeholders: [{ id: "{{__SLOT_002__}}", file: "a.ts", line: 1, type: "string", currentValue: "x", context: "y" }],
       contentFiles: [],
       buildStatus: "success",
       techStack: [],

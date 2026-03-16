@@ -18,22 +18,22 @@ ${config.reportMarkerStart}
   ],
   "placeholders": [
     {
-      "id": "{{NSFW_GAME_TITLE}}",
+      "id": "{{__SLOT_001__}}",
       "file": "src/components/Header.tsx",
       "line": 12,
       "type": "string",
-      "currentValue": "{{NSFW_GAME_TITLE}}",
-      "context": "<h1>{GAME_TITLE}</h1>"
+      "currentValue": "{{__SLOT_001__}}",
+      "context": "<h1>{TITLE}</h1>"
     }
   ],
   "contentFiles": [],
   "buildStatus": "success",
   "techStack": ["react", "tailwind"],
-  "componentTree": "App > Header > GameTitle"
+  "componentTree": "App > Header > Title"
 }
 ${config.reportMarkerEnd}
 
-List EVERY {{NSFW_*}} placeholder you used, with its exact file path, line number, type, and surrounding code context. This is critical for automated post-processing.`
+List EVERY {{__SLOT_NNN__}} placeholder you used, with its exact file path, line number, type, and surrounding code context. This is critical for automated post-processing.`
 }
 
 export class Sanitizer {

@@ -27,7 +27,7 @@ const noopLogger = {
 
 const SPEC: NsfwSpec = {
   contentChanges: [{ file: "content/data.json", path: "title", description: "Adult title" }],
-  codeChanges: [{ type: "string", placeholder: "{{NSFW_TITLE}}", description: "Strip Poker", location: "Header" }],
+  codeChanges: [{ type: "string", placeholder: "{{__SLOT_001__}}", description: "Strip Poker", location: "Header" }],
   context: "Adult card game",
 }
 
@@ -35,8 +35,8 @@ const REPORT: ImplementationReport = {
   summary: "Card game app",
   files: [{ path: "src/app.tsx", action: "created", purpose: "Main app", linesOfCode: 100 }],
   placeholders: [
-    { id: "{{NSFW_TITLE}}", file: "src/app.tsx", line: 5, type: "string", currentValue: "{{NSFW_TITLE}}", context: "const title = ..." },
-    { id: "{{NSFW_DESC}}", file: "src/app.tsx", line: 10, type: "string", currentValue: "{{NSFW_DESC}}", context: "const desc = ..." },
+    { id: "{{__SLOT_001__}}", file: "src/app.tsx", line: 5, type: "string", currentValue: "{{__SLOT_001__}}", context: "const title = ..." },
+    { id: "{{__SLOT_002__}}", file: "src/app.tsx", line: 10, type: "string", currentValue: "{{__SLOT_002__}}", context: "const desc = ..." },
   ],
   contentFiles: [{ path: "content/data.json", schema: { type: "object" }, placeholderPaths: ["title"] }],
   buildStatus: "success",
@@ -51,8 +51,8 @@ describe("NsfwFillService", () => {
       const { system, user } = service.buildFillPrompt(SPEC, REPORT)
 
       expect(system).toContain("content specialist")
-      expect(user).toContain("{{NSFW_TITLE}}")
-      expect(user).toContain("{{NSFW_DESC}}")
+      expect(user).toContain("{{__SLOT_001__}}")
+      expect(user).toContain("{{__SLOT_002__}}")
       expect(user).toContain("File: src/app.tsx")
       expect(user).toContain("Adult card game")
       expect(user).toContain("Generate replacements for all 2 placeholders")
@@ -82,7 +82,7 @@ describe("NsfwFillService", () => {
       const service = new NsfwFillService(CONFIG, noopLogger)
       const json = JSON.stringify({
         edits: [
-          { file: "src/app.tsx", replacements: [{ find: "{{NSFW_TITLE}}", replace: "Strip Poker" }] },
+          { file: "src/app.tsx", replacements: [{ find: "{{__SLOT_001__}}", replace: "Strip Poker" }] },
         ],
         contentFiles: [{ file: "content/data.json", content: { title: "Adult" } }],
       })

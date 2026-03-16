@@ -164,8 +164,8 @@ export interface PipelineState {
 // ── NSFW Fill Result Types ──
 
 export interface FillReplacement {
-  find: string      // "{{NSFW_GAME_TITLE}}"
-  replace: string   // "Strip Poker"
+  find: string      // "{{__SLOT_001__}}"
+  replace: string   // "replacement value"
 }
 
 export interface FileEdit {

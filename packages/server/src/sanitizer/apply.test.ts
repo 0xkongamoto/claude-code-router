@@ -148,15 +148,15 @@ describe("ApplyService", () => {
   describe("applyFileEdits", () => {
     it("replaces placeholders in existing files", async () => {
       const filePath = join(projectDir, "src", "app.ts")
-      await writeFile(filePath, 'const title = "{{NSFW_TITLE}}"\nconst desc = "{{NSFW_DESC}}"')
+      await writeFile(filePath, 'const title = "{{__SLOT_001__}}"\nconst desc = "{{__SLOT_002__}}"')
 
       const fill = createFillResult({
         edits: [
           {
             file: "src/app.ts",
             replacements: [
-              { find: "{{NSFW_TITLE}}", replace: "My Title" },
-              { find: "{{NSFW_DESC}}", replace: "My Description" },
+              { find: "{{__SLOT_001__}}", replace: "My Title" },
+              { find: "{{__SLOT_002__}}", replace: "My Description" },
             ],
           },
         ],
@@ -175,13 +175,13 @@ describe("ApplyService", () => {
 
     it("replaces multiple occurrences of same placeholder", async () => {
       const filePath = join(projectDir, "src", "multi.ts")
-      await writeFile(filePath, "{{NSFW_X}} and {{NSFW_X}} again")
+      await writeFile(filePath, "{{__SLOT_003__}} and {{__SLOT_003__}} again")
 
       const fill = createFillResult({
         edits: [
           {
             file: "src/multi.ts",
-            replacements: [{ find: "{{NSFW_X}}", replace: "replaced" }],
+            replacements: [{ find: "{{__SLOT_003__}}", replace: "replaced" }],
           },
         ],
       })
@@ -198,7 +198,7 @@ describe("ApplyService", () => {
         edits: [
           {
             file: "src/nonexistent.ts",
-            replacements: [{ find: "{{NSFW_X}}", replace: "y" }],
+            replacements: [{ find: "{{__SLOT_003__}}", replace: "y" }],
           },
         ],
       })
@@ -217,7 +217,7 @@ describe("ApplyService", () => {
         edits: [
           {
             file: "src/no-match.ts",
-            replacements: [{ find: "{{NSFW_MISSING}}", replace: "value" }],
+            replacements: [{ find: "{{__SLOT_004__}}", replace: "value" }],
           },
         ],
       })
@@ -283,58 +283,58 @@ describe("ApplyService", () => {
 
   describe("scanPlaceholders", () => {
     it("finds remaining placeholders in src/", async () => {
-      await writeFile(join(projectDir, "src", "partial.ts"), 'const a = "{{NSFW_LEFT_OVER}}"')
+      await writeFile(join(projectDir, "src", "partial.ts"), 'const a = "{{__SLOT_005__}}"')
       // Need a non-empty fill to trigger the full apply flow (empty returns early)
-      await writeFile(join(projectDir, "src", "other.ts"), "{{NSFW_REPLACED}}")
+      await writeFile(join(projectDir, "src", "other.ts"), "{{__SLOT_006__}}")
       const fill = createFillResult({
-        edits: [{ file: "src/other.ts", replacements: [{ find: "{{NSFW_REPLACED}}", replace: "done" }] }],
+        edits: [{ file: "src/other.ts", replacements: [{ find: "{{__SLOT_006__}}", replace: "done" }] }],
       })
       const result = await service.executeApply(fill, projectDir)
 
       expect(result.remainingPlaceholders).toHaveLength(1)
-      expect(result.remainingPlaceholders[0].placeholder).toBe("{{NSFW_LEFT_OVER}}")
+      expect(result.remainingPlaceholders[0].placeholder).toBe("{{__SLOT_005__}}")
       expect(result.remainingPlaceholders[0].line).toBe(1)
     })
 
     it("finds placeholders in content/ directory", async () => {
       const contentDir = join(projectDir, "content")
       await mkdir(contentDir, { recursive: true })
-      await writeFile(join(contentDir, "data.json"), '{"title": "{{NSFW_TITLE}}"}')
+      await writeFile(join(contentDir, "data.json"), '{"title": "{{__SLOT_001__}}"}')
       // Need a non-empty fill to trigger full flow
-      await writeFile(join(projectDir, "src", "dummy.ts"), "{{NSFW_X}}")
+      await writeFile(join(projectDir, "src", "dummy.ts"), "{{__SLOT_003__}}")
       const fill = createFillResult({
-        edits: [{ file: "src/dummy.ts", replacements: [{ find: "{{NSFW_X}}", replace: "y" }] }],
+        edits: [{ file: "src/dummy.ts", replacements: [{ find: "{{__SLOT_003__}}", replace: "y" }] }],
       })
       const result = await service.executeApply(fill, projectDir)
 
       expect(result.remainingPlaceholders).toHaveLength(1)
-      expect(result.remainingPlaceholders[0].placeholder).toBe("{{NSFW_TITLE}}")
+      expect(result.remainingPlaceholders[0].placeholder).toBe("{{__SLOT_001__}}")
     })
 
     it("finds multiple placeholders on same line", async () => {
       await writeFile(
         join(projectDir, "src", "multi.ts"),
-        '"{{NSFW_A}}" + "{{NSFW_B}}"'
+        '"{{__SLOT_007__}}" + "{{__SLOT_008__}}"'
       )
       // Need a non-empty fill to trigger full flow
-      await writeFile(join(projectDir, "src", "dummy.ts"), "{{NSFW_X}}")
+      await writeFile(join(projectDir, "src", "dummy.ts"), "{{__SLOT_003__}}")
       const fill = createFillResult({
-        edits: [{ file: "src/dummy.ts", replacements: [{ find: "{{NSFW_X}}", replace: "y" }] }],
+        edits: [{ file: "src/dummy.ts", replacements: [{ find: "{{__SLOT_003__}}", replace: "y" }] }],
       })
       const result = await service.executeApply(fill, projectDir)
 
       expect(result.remainingPlaceholders).toHaveLength(2)
-      expect(result.remainingPlaceholders.map((p) => p.placeholder)).toEqual(["{{NSFW_A}}", "{{NSFW_B}}"])
+      expect(result.remainingPlaceholders.map((p) => p.placeholder)).toEqual(["{{__SLOT_007__}}", "{{__SLOT_008__}}"])
     })
 
     it("reports zero remaining after successful full apply", async () => {
-      await writeFile(join(projectDir, "src", "app.ts"), 'const x = "{{NSFW_VAL}}"')
+      await writeFile(join(projectDir, "src", "app.ts"), 'const x = "{{__SLOT_009__}}"')
 
       const fill = createFillResult({
         edits: [
           {
             file: "src/app.ts",
-            replacements: [{ find: "{{NSFW_VAL}}", replace: "done" }],
+            replacements: [{ find: "{{__SLOT_009__}}", replace: "done" }],
           },
         ],
       })
@@ -345,11 +345,11 @@ describe("ApplyService", () => {
 
     it("skips node_modules and .git directories", async () => {
       await mkdir(join(projectDir, "src", "node_modules"), { recursive: true })
-      await writeFile(join(projectDir, "src", "node_modules", "lib.ts"), "{{NSFW_SKIP}}")
+      await writeFile(join(projectDir, "src", "node_modules", "lib.ts"), "{{__SLOT_010__}}")
       // Need a non-empty fill to trigger full flow
-      await writeFile(join(projectDir, "src", "dummy.ts"), "{{NSFW_X}}")
+      await writeFile(join(projectDir, "src", "dummy.ts"), "{{__SLOT_003__}}")
       const fill = createFillResult({
-        edits: [{ file: "src/dummy.ts", replacements: [{ find: "{{NSFW_X}}", replace: "y" }] }],
+        edits: [{ file: "src/dummy.ts", replacements: [{ find: "{{__SLOT_003__}}", replace: "y" }] }],
       })
       const result = await service.executeApply(fill, projectDir)
 
@@ -362,9 +362,9 @@ describe("ApplyService", () => {
   describe("buildVerification", () => {
     it("reports success when build command succeeds", async () => {
       const fill = createFillResult({
-        edits: [{ file: "src/app.ts", replacements: [{ find: "{{NSFW_X}}", replace: "y" }] }],
+        edits: [{ file: "src/app.ts", replacements: [{ find: "{{__SLOT_003__}}", replace: "y" }] }],
       })
-      await writeFile(join(projectDir, "src", "app.ts"), "{{NSFW_X}}")
+      await writeFile(join(projectDir, "src", "app.ts"), "{{__SLOT_003__}}")
 
       const result = await service.executeApply(fill, projectDir)
       expect(result.buildVerification.attempted).toBe(true)
@@ -376,9 +376,9 @@ describe("ApplyService", () => {
         { ...DEFAULT_CONFIG, buildCommand: "exit 1" },
         noopLogger
       )
-      await writeFile(join(projectDir, "src", "app.ts"), "{{NSFW_X}}")
+      await writeFile(join(projectDir, "src", "app.ts"), "{{__SLOT_003__}}")
       const fill = createFillResult({
-        edits: [{ file: "src/app.ts", replacements: [{ find: "{{NSFW_X}}", replace: "y" }] }],
+        edits: [{ file: "src/app.ts", replacements: [{ find: "{{__SLOT_003__}}", replace: "y" }] }],
       })
 
       const result = await failService.executeApply(fill, projectDir)
@@ -391,9 +391,9 @@ describe("ApplyService", () => {
         { ...DEFAULT_CONFIG, buildCommand: "sleep 60", buildTimeoutMs: 500 },
         noopLogger
       )
-      await writeFile(join(projectDir, "src", "app.ts"), "{{NSFW_X}}")
+      await writeFile(join(projectDir, "src", "app.ts"), "{{__SLOT_003__}}")
       const fill = createFillResult({
-        edits: [{ file: "src/app.ts", replacements: [{ find: "{{NSFW_X}}", replace: "y" }] }],
+        edits: [{ file: "src/app.ts", replacements: [{ find: "{{__SLOT_003__}}", replace: "y" }] }],
       })
 
       const result = await slowService.executeApply(fill, projectDir)
@@ -417,11 +417,11 @@ describe("ApplyService", () => {
     })
 
     it("commits applied changes on successful build", async () => {
-      await writeFile(join(projectDir, "src", "app.ts"), "{{NSFW_X}}")
+      await writeFile(join(projectDir, "src", "app.ts"), "{{__SLOT_003__}}")
       execSync("git add -A && git commit -m 'add file'", { cwd: projectDir, stdio: "ignore" })
 
       const fill = createFillResult({
-        edits: [{ file: "src/app.ts", replacements: [{ find: "{{NSFW_X}}", replace: "done" }] }],
+        edits: [{ file: "src/app.ts", replacements: [{ find: "{{__SLOT_003__}}", replace: "done" }] }],
       })
 
       const result = await gitService.executeApply(fill, projectDir)
@@ -436,11 +436,11 @@ describe("ApplyService", () => {
         { ...DEFAULT_CONFIG, gitEnabled: true, buildCommand: "exit 1" },
         noopLogger
       )
-      await writeFile(join(projectDir, "src", "app.ts"), "{{NSFW_ORIGINAL}}")
+      await writeFile(join(projectDir, "src", "app.ts"), "{{__SLOT_012__}}")
       execSync("git add -A && git commit -m 'add file'", { cwd: projectDir, stdio: "ignore" })
 
       const fill = createFillResult({
-        edits: [{ file: "src/app.ts", replacements: [{ find: "{{NSFW_ORIGINAL}}", replace: "broken" }] }],
+        edits: [{ file: "src/app.ts", replacements: [{ find: "{{__SLOT_012__}}", replace: "broken" }] }],
       })
 
       const result = await failGitService.executeApply(fill, projectDir)
@@ -448,15 +448,15 @@ describe("ApplyService", () => {
       expect(result.buildVerification.success).toBe(false)
 
       const content = await readFile(join(projectDir, "src", "app.ts"), "utf-8")
-      expect(content).toBe("{{NSFW_ORIGINAL}}")
+      expect(content).toBe("{{__SLOT_012__}}")
     })
 
     it("proceeds without git when not a git repo", async () => {
       const nonGitDir = await createTempProject()
       try {
-        await writeFile(join(nonGitDir, "src", "app.ts"), "{{NSFW_X}}")
+        await writeFile(join(nonGitDir, "src", "app.ts"), "{{__SLOT_003__}}")
         const fill = createFillResult({
-          edits: [{ file: "src/app.ts", replacements: [{ find: "{{NSFW_X}}", replace: "y" }] }],
+          edits: [{ file: "src/app.ts", replacements: [{ find: "{{__SLOT_003__}}", replace: "y" }] }],
         })
 
         const nonGitService = new ApplyService({ ...DEFAULT_CONFIG, gitEnabled: true }, noopLogger)
@@ -475,14 +475,14 @@ describe("ApplyService", () => {
     it("applies edits + writes content files + scans placeholders", async () => {
       await writeFile(
         join(projectDir, "src", "page.tsx"),
-        'const title = "{{NSFW_TITLE}}"\nconst x = "{{NSFW_UNFILLED}}"'
+        'const title = "{{__SLOT_001__}}"\nconst x = "{{__SLOT_011__}}"'
       )
 
       const fill = createFillResult({
         edits: [
           {
             file: "src/page.tsx",
-            replacements: [{ find: "{{NSFW_TITLE}}", replace: "Adult Game" }],
+            replacements: [{ find: "{{__SLOT_001__}}", replace: "Adult Game" }],
           },
         ],
         contentFiles: [
@@ -495,7 +495,7 @@ describe("ApplyService", () => {
       expect(result.totalReplacementsApplied).toBe(1)
       expect(result.totalContentFilesWritten).toBe(1)
       expect(result.remainingPlaceholders).toHaveLength(1)
-      expect(result.remainingPlaceholders[0].placeholder).toBe("{{NSFW_UNFILLED}}")
+      expect(result.remainingPlaceholders[0].placeholder).toBe("{{__SLOT_011__}}")
       expect(result.buildVerification.success).toBe(true)
       expect(result.rolledBack).toBe(false)
       expect(result.latencyMs).toBeGreaterThan(0)
