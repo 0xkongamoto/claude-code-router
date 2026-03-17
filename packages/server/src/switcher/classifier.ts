@@ -38,6 +38,36 @@ NSFW = explicit sexual content, graphic violence, hate speech, illegal activitie
 Reply with ONLY this JSON, nothing else:
 {"classification":"sfw","confidence":0.95}`
 
+export function extractFirstUserMessage(messages: Message[]): string | null {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return null
+  }
+
+  for (const message of messages) {
+    if (message.role !== "user") continue
+
+    if (typeof message.content === "string") {
+      return stripSystemContent(message.content)
+    }
+
+    if (Array.isArray(message.content)) {
+      // In Claude Code, the actual user text is the last text block.
+      // Earlier blocks contain system reminders, CLAUDE.md, tool results, etc.
+      for (let i = message.content.length - 1; i >= 0; i--) {
+        const block = message.content[i]
+        if (block.type === "text" && typeof block.text === "string") {
+          const stripped = stripSystemContent(block.text)
+          if (stripped) return stripped
+        }
+      }
+    }
+
+    return null
+  }
+
+  return null
+}
+
 export function extractLastUserMessage(messages: Message[]): string | null {
   if (!Array.isArray(messages) || messages.length === 0) {
     return null

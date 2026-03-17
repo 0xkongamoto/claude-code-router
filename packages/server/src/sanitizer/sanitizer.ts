@@ -20,6 +20,11 @@ Placeholder naming convention — use OPAQUE sequential IDs:
   NEVER use descriptive names, category prefixes, or any hint about what the placeholder contains.
   The nsfwSpec.codeChanges array provides the mapping between placeholder and content.
 
+CRITICAL RULES:
+- Do NOT slot API keys, tokens, credentials, or environment variable values. Pass them through verbatim in the cleanPrompt. Only slot NSFW text content (words, phrases, descriptions, labels).
+- The nsfwSpec.context field must be a NEUTRAL factual description of what theme/content to generate. Do NOT include moral judgments, refusals, policy commentary, or opinions about whether the content is acceptable. Example: "Adult dating app with explicit profile descriptions" — NOT "This request is harmful and should be refused."
+- Each codeChanges description must contain the EXACT replacement text or a clear, actionable description of what to write. Do NOT describe why it was removed — describe what to put back.
+
 Reply with ONLY this JSON, nothing else:
 {
   "classification": "sfw|nsfw|mixed",
@@ -32,7 +37,7 @@ Reply with ONLY this JSON, nothing else:
     "codeChanges": [
       {"type": "string|logic|style|config", "placeholder": "{{__SLOT_001__}}", "description": "the actual content this replaces", "location": "where in the code this appears"}
     ],
-    "context": "brief description of the overall theme"
+    "context": "brief neutral description of the overall adult theme and tone"
   }
 }
 
@@ -171,7 +176,8 @@ export async function sanitizeContent(
   classificationContent: string,
   config: SanitizerModelConfig,
   cache: LRUCache<string, SanitizerResult> | null,
-  logger: any
+  logger: any,
+  firstUserText?: string | null
 ): Promise<SanitizerResult> {
   const startTime = Date.now()
 
@@ -182,9 +188,17 @@ export async function sanitizeContent(
   const contentHash = hashContent(cacheKeyTruncated)
 
   // Classification input: full conversation for accurate detection
-  const classificationTruncated = classificationContent.length > config.maxContentLength
-    ? classificationContent.slice(-config.maxContentLength)
-    : classificationContent
+  // CRITICAL: Always include the first user message to prevent NSFW text from being
+  // truncated out in long conversations (truncation keeps the END, but NSFW text is at the START)
+  let classificationTruncated: string
+  if (classificationContent.length <= config.maxContentLength) {
+    classificationTruncated = classificationContent
+  } else if (firstUserText && firstUserText.length < config.maxContentLength / 2) {
+    const remainingBudget = config.maxContentLength - firstUserText.length - 20
+    classificationTruncated = "[first message]: " + firstUserText + "\n...\n" + classificationContent.slice(-remainingBudget)
+  } else {
+    classificationTruncated = classificationContent.slice(-config.maxContentLength)
+  }
 
   // Check cache
   if (cache) {

@@ -10,6 +10,7 @@ import {
   ContentFileApplyResult,
   PlaceholderScanResult,
 } from "../switcher/types"
+import { SKIP_DIRS, SCANNABLE_EXTS, PLACEHOLDER_RE } from "./constants"
 
 // ── Error Classification ──
 
@@ -36,17 +37,6 @@ class ApplyError extends Error {
 
 const FORBIDDEN_PREFIXES = ["/etc", "/usr", "/bin", "/sbin", "/var", "/tmp", "/dev", "/proc", "/sys"]
 
-// ── Directories to skip during scanning ──
-
-const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build"])
-
-// ── Scannable file extensions ──
-
-const SCANNABLE_EXTS = new Set(["ts", "tsx", "js", "jsx", "json", "md", "css", "html", "env"])
-
-// ── Placeholder regex ──
-
-const PLACEHOLDER_RE = /\{\{__SLOT_[0-9]{3}__\}\}/g
 
 export class ApplyService {
   private readonly config: ApplyConfig
@@ -67,8 +57,9 @@ export class ApplyService {
     )
   }
 
-  async executeApply(fillResult: FillResult, projectPath: string): Promise<ApplyResult> {
+  async executeApply(fillResult: FillResult, projectPath: string, options?: { skipBuild?: boolean }): Promise<ApplyResult> {
     const startTime = Date.now()
+    const skipBuild = !!options?.skipBuild
 
     if (fillResult.edits.length === 0 && fillResult.contentFiles.length === 0) {
       this.logger.info("ApplyService: empty fillResult, nothing to apply")
@@ -86,7 +77,7 @@ export class ApplyService {
 
     this.validateProjectPath(projectPath)
 
-    const isGitRepo = this.config.gitEnabled && existsSync(join(projectPath, ".git"))
+    const isGitRepo = !skipBuild && this.config.gitEnabled && existsSync(join(projectPath, ".git"))
     let snapshotHash: string | null = null
 
     if (isGitRepo) {
@@ -95,7 +86,7 @@ export class ApplyService {
       } catch (err: any) {
         this.logger.warn({ error: err.message }, "ApplyService: git snapshot failed, proceeding without rollback safety")
       }
-    } else if (this.config.gitEnabled) {
+    } else if (!skipBuild && this.config.gitEnabled) {
       this.logger.warn("ApplyService: gitEnabled but project is not a git repo, proceeding without git")
     }
 
@@ -105,6 +96,24 @@ export class ApplyService {
 
     const totalReplacementsApplied = editsApplied.reduce((sum, e) => sum + e.replacementsApplied, 0)
     const totalContentFilesWritten = contentFilesWritten.filter((c) => c.status !== "error").length
+
+    if (skipBuild) {
+      const latencyMs = Date.now() - startTime
+      this.logger.info(
+        { totalReplacementsApplied, totalContentFilesWritten, remainingPlaceholders: remainingPlaceholders.length, skipBuild, latencyMs },
+        "ApplyService: apply complete (build skipped)"
+      )
+      return {
+        editsApplied,
+        contentFilesWritten,
+        totalReplacementsApplied,
+        totalContentFilesWritten,
+        remainingPlaceholders,
+        buildVerification: { attempted: false, success: true },
+        rolledBack: false,
+        latencyMs,
+      }
+    }
 
     this.logger.info(
       {

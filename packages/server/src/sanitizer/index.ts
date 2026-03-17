@@ -1,6 +1,6 @@
 import { LRUCache } from "lru-cache"
 import { PipelineConfig, SanitizerResult, SfwAgentConfig, parsePipelineConfig } from "../switcher/types"
-import { extractAllMessagesText, extractUserOnlyText } from "../switcher/classifier"
+import { extractAllMessagesText, extractUserOnlyText, extractFirstUserMessage } from "../switcher/classifier"
 import { sanitizeContent } from "./sanitizer"
 import { sanitizeAllUserMessages } from "./replace"
 import { PipelineStore } from "./store"
@@ -8,7 +8,30 @@ import { PipelineStore } from "./store"
 export function buildReportInstruction(config: SfwAgentConfig): string {
   return `
 
-IMPORTANT: After completing the implementation, output a structured implementation report wrapped in markers. This report must be valid JSON.
+## PLACEHOLDER RULES (CRITICAL — READ CAREFULLY)
+
+The user's prompt contains {{__SLOT_NNN__}} placeholders. These are template variables that will be replaced by a post-processing system after you finish.
+
+**You MUST:**
+1. Use EVERY {{__SLOT_NNN__}} placeholder from the prompt VERBATIM in your code output — copy-paste the exact string including the {{ }} braces
+2. Place each placeholder in the appropriate code location (string literals, variable assignments, JSX text, config values, etc.)
+3. If the prompt has N placeholders, your code MUST contain at least N placeholder occurrences
+4. Treat placeholders as opaque values — do NOT try to guess what they mean or replace them with your own content
+
+**Example:** If the prompt says "the title is {{__SLOT_001__}}", your code should contain:
+\`\`\`
+const title = "{{__SLOT_001__}}"
+\`\`\`
+NOT:
+\`\`\`
+const title = "My App"  // WRONG — placeholder was dropped
+\`\`\`
+
+If the context suggests additional UI labels, descriptions, button text, or content that relate to the NSFW-themed parts of the application, create ADDITIONAL placeholders using the next sequential numbers (e.g., if the prompt uses up to {{__SLOT_004__}}, you may add {{__SLOT_005__}}, {{__SLOT_006__}}, etc.). This ensures all adult-themed text can be post-processed.
+
+## IMPLEMENTATION REPORT
+
+After completing the implementation, output a structured implementation report wrapped in markers. This report must be valid JSON.
 
 ${config.reportMarkerStart}
 {
@@ -78,12 +101,17 @@ export class Sanitizer {
     // User-only text for stable cache key across tool-call rounds
     const cacheKeyContent = extractUserOnlyText(messages) || classificationContent
 
+    // First user message: must always be included in classification to prevent
+    // NSFW text from being truncated out of the classification window in long conversations
+    const firstUserText = extractFirstUserMessage(messages)
+
     const result = await sanitizeContent(
       cacheKeyContent,
       classificationContent,
       this.config.sanitizer,
       this.cache,
-      this.logger
+      this.logger,
+      firstUserText
     )
 
     this.logger.info(

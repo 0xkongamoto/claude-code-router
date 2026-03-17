@@ -22,6 +22,7 @@ import { PipelineStore } from "./sanitizer/store";
 import { ReportAccumulator } from "./sanitizer/report";
 import { NsfwFillService } from "./sanitizer/fill";
 import { ApplyService } from "./sanitizer/apply";
+import { scanProjectPlaceholders, buildSyntheticReport } from "./sanitizer/scan";
 import { ResponseAccumulator } from "./utils/ResponseAccumulator";
 
 const event = new EventEmitter()
@@ -687,11 +688,57 @@ async function getServer(options: RunOptions = {}) {
         pollUrl: `/api/pipeline/${sessionId}`,
       }
     })
+
+    serverInstance.app.post("/api/pipeline/trigger-complete", async (req: any, reply: any) => {
+      const { projectPath: filterProjectPath, skipBuild } = req.body || {}
+
+      let sessions = pipelineStore.listSessions()
+        .filter((s: any) => s.status === "sfw_in_progress" && s.projectPath)
+
+      if (filterProjectPath && typeof filterProjectPath === "string") {
+        sessions = sessions.filter((s: any) => s.projectPath === filterProjectPath)
+      }
+
+      if (sessions.length === 0) {
+        serverInstance.app.log.info("Pipeline: trigger-complete — no sfw_in_progress sessions")
+        return { triggered: 0 }
+      }
+
+      const pipelineOptions = skipBuild ? { skipBuild: true } : undefined
+      const results: Array<{ sessionId: string; placeholders: number }> = []
+      for (const session of sessions) {
+        try {
+          const scanResults = await scanProjectPlaceholders(session.projectPath!)
+          if (scanResults.length === 0) {
+            serverInstance.app.log.info(
+              { sessionId: session.sessionId, projectPath: session.projectPath },
+              "Pipeline: trigger-complete — no placeholders found, skipping"
+            )
+            continue
+          }
+
+          const report = buildSyntheticReport(session.projectPath!, scanResults)
+          pipelineStore.setReport(session.sessionId, report)
+          serverInstance.app.log.info(
+            { sessionId: session.sessionId, placeholderCount: report.placeholders.length },
+            "Pipeline: trigger-complete — synthetic report created"
+          )
+          event.emit("pipeline:reportCaptured", session.sessionId, pipelineOptions)
+          results.push({ sessionId: session.sessionId, placeholders: report.placeholders.length })
+        } catch (err: any) {
+          serverInstance.app.log.error(
+            { sessionId: session.sessionId, error: err.message },
+            "Pipeline: trigger-complete scan failed"
+          )
+        }
+      }
+      return { triggered: results.length, results }
+    })
   }
 
   // Auto-trigger pipeline: fill → apply after report extraction
   if (pipelineStore && fillService && applyService) {
-    event.on('pipeline:reportCaptured', async (sessionId: string) => {
+    event.on('pipeline:reportCaptured', async (sessionId: string, options?: { skipBuild?: boolean }) => {
       try {
         const state = pipelineStore.getSession(sessionId)
         if (!state || state.status !== 'sfw_complete') return
@@ -713,10 +760,10 @@ async function getServer(options: RunOptions = {}) {
         }
 
         pipelineStore.setStatus(sessionId, 'apply_in_progress')
-        const applyResult = await applyService.executeApply(fillResult, projectPath)
+        const applyResult = await applyService.executeApply(fillResult, projectPath, options)
         pipelineStore.setApplyResult(sessionId, applyResult)
         serverInstance.app.log.info(
-          { sessionId, projectPath },
+          { sessionId, projectPath, skipBuild: !!options?.skipBuild },
           'Pipeline: auto-apply complete'
         )
       } catch (err: any) {
