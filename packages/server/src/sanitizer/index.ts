@@ -102,6 +102,17 @@ export class Sanitizer {
   }
 }
 
+export function extractProjectPath(system: any): string | null {
+  const text = typeof system === "string"
+    ? system
+    : Array.isArray(system)
+      ? system.map((b: any) => (typeof b === "string" ? b : b?.text ?? "")).join("\n")
+      : null
+  if (!text) return null
+  const match = text.match(/Primary working directory:\s*(.+)/)
+  return match?.[1]?.trim() || null
+}
+
 export function createSanitizerHook(sanitizer: Sanitizer, store: PipelineStore | null, logger?: any) {
   const reportInstruction = buildReportInstruction(sanitizer.config.sfwAgent)
 
@@ -166,7 +177,8 @@ export function createSanitizerHook(sanitizer: Sanitizer, store: PipelineStore |
 
       // Initialize pipeline state for this session
       if (store && req.sessionId && result.nsfwSpec) {
-        store.initSessionIfNeeded(req.sessionId, result.nsfwSpec, result.originalClassification)
+        const projectPath = extractProjectPath(req.body.system)
+        store.initSessionIfNeeded(req.sessionId, result.nsfwSpec, result.originalClassification, projectPath)
       }
 
       // Log nsfwSpec for manual retrieval

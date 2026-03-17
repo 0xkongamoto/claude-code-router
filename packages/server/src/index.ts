@@ -362,6 +362,7 @@ async function getServer(options: RunOptions = {}) {
                   const report = accumulator.addChunk(value.data.delta.text)
                   if (report && req.sessionId) {
                     pipelineStore.setReport(req.sessionId, report)
+                    event.emit('pipeline:reportCaptured', req.sessionId)
                     break
                   }
                 }
@@ -684,6 +685,49 @@ async function getServer(options: RunOptions = {}) {
         contentFileCount: fillResult.contentFiles.length,
         status: "apply_pending",
         pollUrl: `/api/pipeline/${sessionId}`,
+      }
+    })
+  }
+
+  // Auto-trigger pipeline: fill → apply after report extraction
+  if (pipelineStore && fillService && applyService) {
+    event.on('pipeline:reportCaptured', async (sessionId: string) => {
+      try {
+        const state = pipelineStore.getSession(sessionId)
+        if (!state || state.status !== 'sfw_complete') return
+        if (!state.nsfwSpec || !state.implementationReport) return
+
+        // Phase 2: NSFW fill
+        pipelineStore.setStatus(sessionId, 'nsfw_in_progress')
+        const fillResult = await fillService.executeFill(state.nsfwSpec, state.implementationReport)
+        pipelineStore.setFillResult(sessionId, fillResult)
+
+        // Phase 3: Resolve projectPath + apply
+        let projectPath = state.projectPath
+        if (!projectPath) {
+          serverInstance.app.log.warn(
+            { sessionId },
+            'Pipeline: auto-apply skipped — projectPath not captured from request'
+          )
+          return
+        }
+
+        pipelineStore.setStatus(sessionId, 'apply_in_progress')
+        const applyResult = await applyService.executeApply(fillResult, projectPath)
+        pipelineStore.setApplyResult(sessionId, applyResult)
+        serverInstance.app.log.info(
+          { sessionId, projectPath },
+          'Pipeline: auto-apply complete'
+        )
+      } catch (err: any) {
+        const errorMsg = err.kind
+          ? `[${err.kind}] ${err.message}`
+          : err.message
+        serverInstance.app.log.error(
+          { sessionId, error: errorMsg },
+          'Pipeline: auto-trigger failed'
+        )
+        pipelineStore.setStatus(sessionId, 'error', errorMsg)
       }
     })
   }

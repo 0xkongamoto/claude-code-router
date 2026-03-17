@@ -38,7 +38,15 @@ describe("PipelineStore", () => {
 
       expect(state.applyResult).toBeNull()
       expect(state.fillResult).toBeNull()
+      expect(state.projectPath).toBeNull()
       expect(state.status).toBe("sfw_in_progress")
+    })
+
+    it("stores projectPath when provided", () => {
+      const store = new PipelineStore(10, 60000, noopLogger)
+      const state = store.initSession("s1", SPEC, "nsfw", "/home/user/project")
+
+      expect(state.projectPath).toBe("/home/user/project")
     })
   })
 

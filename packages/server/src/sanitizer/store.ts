@@ -24,7 +24,8 @@ export class PipelineStore {
   initSession(
     sessionId: string,
     nsfwSpec: NsfwSpec,
-    classification: ContentClassification
+    classification: ContentClassification,
+    projectPath?: string | null
   ): PipelineState {
     const now = Date.now()
     const state: PipelineState = {
@@ -35,18 +36,20 @@ export class PipelineStore {
       fillResult: null,
       applyResult: null,
       originalClassification: classification,
+      projectPath: projectPath ?? null,
       createdAt: now,
       updatedAt: now,
     }
     this.cache.set(sessionId, state)
-    this.logger.info({ sessionId, classification }, "Pipeline: session initialized")
+    this.logger.info({ sessionId, classification, projectPath: projectPath ?? null }, "Pipeline: session initialized")
     return state
   }
 
   initSessionIfNeeded(
     sessionId: string,
     nsfwSpec: NsfwSpec,
-    classification: ContentClassification
+    classification: ContentClassification,
+    projectPath?: string | null
   ): PipelineState {
     const existing = this.cache.get(sessionId)
     if (existing) {
@@ -56,7 +59,7 @@ export class PipelineStore {
       )
       return existing
     }
-    return this.initSession(sessionId, nsfwSpec, classification)
+    return this.initSession(sessionId, nsfwSpec, classification, projectPath)
   }
 
   getSession(sessionId: string): PipelineState | null {

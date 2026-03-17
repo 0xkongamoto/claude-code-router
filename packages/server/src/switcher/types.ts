@@ -156,6 +156,7 @@ export interface PipelineState {
   fillResult: FillResult | null
   applyResult: ApplyResult | null
   originalClassification: ContentClassification
+  projectPath: string | null
   createdAt: number
   updatedAt: number
   error?: string
