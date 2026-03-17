@@ -91,6 +91,30 @@ export function extractAllMessagesText(messages: Message[]): string | null {
   return texts.length > 0 ? texts.join("\n") : null
 }
 
+export function extractUserOnlyText(messages: Message[]): string | null {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return null
+  }
+
+  const texts: string[] = []
+  for (const message of messages) {
+    if (message.role !== "user") continue
+    if (typeof message.content === "string") {
+      const stripped = stripSystemContent(message.content)
+      if (stripped) texts.push(stripped)
+    } else if (Array.isArray(message.content)) {
+      for (const block of message.content) {
+        if (block.type === "text" && typeof block.text === "string") {
+          const stripped = stripSystemContent(block.text)
+          if (stripped) texts.push(stripped)
+        }
+      }
+    }
+  }
+
+  return texts.length > 0 ? texts.join("\n") : null
+}
+
 export function hashContent(content: string): string {
   return createHash("sha256").update(content).digest("hex")
 }

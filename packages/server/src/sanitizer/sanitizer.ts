@@ -167,18 +167,24 @@ function parseSanitizerResponse(
 }
 
 export async function sanitizeContent(
-  content: string,
+  cacheKeyContent: string,
+  classificationContent: string,
   config: SanitizerModelConfig,
   cache: LRUCache<string, SanitizerResult> | null,
   logger: any
 ): Promise<SanitizerResult> {
   const startTime = Date.now()
 
-  // Truncate from the end to keep the most recent content
-  const truncated = content.length > config.maxContentLength
-    ? content.slice(-config.maxContentLength)
-    : content
-  const contentHash = hashContent(truncated)
+  // Cache key: user-only text, stable across tool-call rounds within a turn
+  const cacheKeyTruncated = cacheKeyContent.length > config.maxContentLength
+    ? cacheKeyContent.slice(-config.maxContentLength)
+    : cacheKeyContent
+  const contentHash = hashContent(cacheKeyTruncated)
+
+  // Classification input: full conversation for accurate detection
+  const classificationTruncated = classificationContent.length > config.maxContentLength
+    ? classificationContent.slice(-config.maxContentLength)
+    : classificationContent
 
   // Check cache
   if (cache) {
@@ -206,10 +212,11 @@ export async function sanitizeContent(
       body: JSON.stringify({
         model: config.model,
         max_tokens: 2048,
+        temperature: 0,
         messages: [
           {
             role: "user",
-            content: `${SANITIZER_PROMPT}\n\nMessage:\n${truncated}`,
+            content: `${SANITIZER_PROMPT}\n\nMessage:\n${classificationTruncated}`,
           },
         ],
       }),

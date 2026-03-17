@@ -43,6 +43,22 @@ export class PipelineStore {
     return state
   }
 
+  initSessionIfNeeded(
+    sessionId: string,
+    nsfwSpec: NsfwSpec,
+    classification: ContentClassification
+  ): PipelineState {
+    const existing = this.cache.get(sessionId)
+    if (existing) {
+      this.logger.debug(
+        { sessionId, status: existing.status },
+        "Pipeline: session already exists, skipping re-initialization"
+      )
+      return existing
+    }
+    return this.initSession(sessionId, nsfwSpec, classification)
+  }
+
   getSession(sessionId: string): PipelineState | null {
     return this.cache.get(sessionId) ?? null
   }

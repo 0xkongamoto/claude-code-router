@@ -1,6 +1,6 @@
 import { LRUCache } from "lru-cache"
 import { PipelineConfig, SanitizerResult, SfwAgentConfig, parsePipelineConfig } from "../switcher/types"
-import { extractAllMessagesText } from "../switcher/classifier"
+import { extractAllMessagesText, extractUserOnlyText } from "../switcher/classifier"
 import { sanitizeContent } from "./sanitizer"
 import { sanitizeAllUserMessages } from "./replace"
 import { PipelineStore } from "./store"
@@ -69,14 +69,18 @@ export class Sanitizer {
   }
 
   async decompose(messages: any[]): Promise<SanitizerResult | null> {
-    const content = extractAllMessagesText(messages)
-    if (!content) {
+    const classificationContent = extractAllMessagesText(messages)
+    if (!classificationContent) {
       this.logger.debug("Sanitizer: no text content found in messages, skipping")
       return null
     }
 
+    // User-only text for stable cache key across tool-call rounds
+    const cacheKeyContent = extractUserOnlyText(messages) || classificationContent
+
     const result = await sanitizeContent(
-      content,
+      cacheKeyContent,
+      classificationContent,
       this.config.sanitizer,
       this.cache,
       this.logger
@@ -162,7 +166,7 @@ export function createSanitizerHook(sanitizer: Sanitizer, store: PipelineStore |
 
       // Initialize pipeline state for this session
       if (store && req.sessionId && result.nsfwSpec) {
-        store.initSession(req.sessionId, result.nsfwSpec, result.originalClassification)
+        store.initSessionIfNeeded(req.sessionId, result.nsfwSpec, result.originalClassification)
       }
 
       // Log nsfwSpec for manual retrieval

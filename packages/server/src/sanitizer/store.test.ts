@@ -42,6 +42,34 @@ describe("PipelineStore", () => {
     })
   })
 
+  describe("initSessionIfNeeded", () => {
+    it("creates session when none exists", () => {
+      const store = new PipelineStore(10, 60000, noopLogger)
+      const state = store.initSessionIfNeeded("s1", SPEC, "nsfw")
+      expect(state.status).toBe("sfw_in_progress")
+      expect(state.sessionId).toBe("s1")
+    })
+
+    it("returns existing session without overwriting", () => {
+      const store = new PipelineStore(10, 60000, noopLogger)
+      store.initSession("s1", SPEC, "nsfw")
+      store.setReport("s1", {
+        summary: "test report",
+        files: [],
+        placeholders: [],
+        contentFiles: [],
+        buildStatus: "success",
+        techStack: [],
+        componentTree: "",
+      })
+
+      const state = store.initSessionIfNeeded("s1", SPEC, "nsfw")
+      expect(state.implementationReport).not.toBeNull()
+      expect(state.implementationReport!.summary).toBe("test report")
+      expect(state.status).toBe("sfw_complete")
+    })
+  })
+
   describe("setApplyResult", () => {
     it("stores apply result and sets status to apply_complete", () => {
       const store = new PipelineStore(10, 60000, noopLogger)

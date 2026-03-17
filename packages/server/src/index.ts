@@ -215,6 +215,16 @@ async function getServer(options: RunOptions = {}) {
     }
   })
 
+  // Extract sessionId from metadata early so it is available in all preHandler hooks
+  serverInstance.addHook("preHandler", async (req: any) => {
+    if (req.body?.metadata?.user_id && !req.sessionId) {
+      const parts = req.body.metadata.user_id.split("_session_")
+      if (parts.length > 1) {
+        req.sessionId = parts[1]
+      }
+    }
+  })
+
   // Strip thinking blocks from previous messages to avoid invalid signature errors
   // when routing through different providers/proxies
   serverInstance.addHook("preHandler", async (req: any, reply: any) => {
@@ -325,12 +335,21 @@ async function getServer(options: RunOptions = {}) {
         ).catch(() => {})
 
         // Pipeline: extract implementation report from streaming response
-        if (req.sanitizerResult && pipelineStore && !req.agents) {
+        // Also trigger when an active NSFW session exists (final response may classify as SFW
+        // because the conversation grew long and the truncated window is all code)
+        const activeSession = pipelineStore?.getSession(req.sessionId)
+        const shouldExtractReport = !req.agents && pipelineStore && (
+          req.sanitizerResult ||
+          (activeSession && activeSession.status === "sfw_in_progress")
+        )
+        if (shouldExtractReport) {
           const [originalStream, extractionStream] = processingStream.tee()
 
           const accumulator = new ReportAccumulator(sanitizer.config.sfwAgent)
           const extractReport = async (stream: ReadableStream) => {
-            const parsed = stream.pipeThrough(new SSEParserTransform())
+            // Decode binary stream to text before SSE parsing
+            const textStream = stream.pipeThrough(new TextDecoderStream())
+            const parsed = textStream.pipeThrough(new SSEParserTransform())
             const reader = parsed.getReader()
             try {
               while (true) {

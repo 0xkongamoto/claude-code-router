@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { LRUCache } from "lru-cache"
 import { sanitizeContent } from "./sanitizer"
-import { SanitizerModelConfig } from "../switcher/types"
+import { SanitizerModelConfig, SanitizerResult } from "../switcher/types"
 
 const noopLogger = {
   child: () => noopLogger,
@@ -21,6 +22,31 @@ const CONFIG: SanitizerModelConfig = {
   cacheMaxSize: 0,
 }
 
+const CONFIG_WITH_CACHE: SanitizerModelConfig = {
+  ...CONFIG,
+  cacheEnabled: true,
+  cacheTtlMs: 300000,
+  cacheMaxSize: 100,
+}
+
+function sfwResponse() {
+  return {
+    ok: true,
+    json: () => Promise.resolve({
+      content: [{ text: '{"classification":"sfw","confidence":0.9,"cleanPrompt":null,"nsfwSpec":null}' }],
+    }),
+  }
+}
+
+function mixedResponse() {
+  return {
+    ok: true,
+    json: () => Promise.resolve({
+      content: [{ text: '{"classification":"mixed","confidence":0.9,"cleanPrompt":"clean version","nsfwSpec":null}' }],
+    }),
+  }
+}
+
 describe("sanitizeContent", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -33,7 +59,7 @@ describe("sanitizeContent", () => {
       text: () => Promise.resolve("Internal Server Error"),
     }))
 
-    const result = await sanitizeContent("test content", CONFIG, null, noopLogger)
+    const result = await sanitizeContent("test content", "test content", CONFIG, null, noopLogger)
     expect(result.classification).toBe("sfw")
     expect(result.confidence).toBe(0)
     expect(result.nsfwSpec).toBeNull()
@@ -47,7 +73,7 @@ describe("sanitizeContent", () => {
       }),
     }))
 
-    const result = await sanitizeContent("hello world", CONFIG, null, noopLogger)
+    const result = await sanitizeContent("hello world", "hello world", CONFIG, null, noopLogger)
     expect(result.classification).toBe("sfw")
     expect(result.confidence).toBe(0.95)
     expect(result.cleanPrompt).toBeNull()
@@ -70,7 +96,7 @@ describe("sanitizeContent", () => {
       json: () => Promise.resolve({ content: [{ text: JSON.stringify(response) }] }),
     }))
 
-    const result = await sanitizeContent("build strip poker", CONFIG, null, noopLogger)
+    const result = await sanitizeContent("build strip poker", "build strip poker", CONFIG, null, noopLogger)
     expect(result.classification).toBe("nsfw")
     expect(result.cleanPrompt).toContain("{{__SLOT_001__}}")
     expect(result.nsfwSpec).not.toBeNull()
@@ -101,7 +127,7 @@ describe("sanitizeContent", () => {
       json: () => Promise.resolve({ content: [{ text: JSON.stringify(response) }] }),
     }))
 
-    const result = await sanitizeContent("test", CONFIG, null, noopLogger)
+    const result = await sanitizeContent("test", "test", CONFIG, null, noopLogger)
     expect(result.nsfwSpec!.contentChanges).toHaveLength(1)
     expect(result.nsfwSpec!.codeChanges).toHaveLength(1)
   })
@@ -115,7 +141,7 @@ describe("sanitizeContent", () => {
       }),
     }))
 
-    const result = await sanitizeContent("test", CONFIG, null, noopLogger)
+    const result = await sanitizeContent("test", "test", CONFIG, null, noopLogger)
     expect(result.classification).toBe("mixed")
     expect(result.confidence).toBe(0.85)
   })
@@ -128,7 +154,7 @@ describe("sanitizeContent", () => {
       }),
     }))
 
-    const result = await sanitizeContent("test", CONFIG, null, noopLogger)
+    const result = await sanitizeContent("test", "test", CONFIG, null, noopLogger)
     expect(result.classification).toBe("nsfw")
     expect(result.confidence).toBe(0.5)
   })
@@ -138,7 +164,7 @@ describe("sanitizeContent", () => {
       Object.assign(new Error("timeout"), { name: "AbortError" })
     ))
 
-    const result = await sanitizeContent("test", CONFIG, null, noopLogger)
+    const result = await sanitizeContent("test", "test", CONFIG, null, noopLogger)
     expect(result.classification).toBe("sfw")
     expect(result.confidence).toBe(0)
   })
@@ -151,11 +177,11 @@ describe("sanitizeContent", () => {
       }),
     }))
 
-    const result = await sanitizeContent("test", CONFIG, null, noopLogger)
+    const result = await sanitizeContent("test", "test", CONFIG, null, noopLogger)
     expect(result.confidence).toBe(1)
   })
 
-  it("truncates content exceeding maxContentLength", async () => {
+  it("truncates classificationContent exceeding maxContentLength", async () => {
     let capturedBody = ""
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url: string, opts: any) => {
       capturedBody = opts.body
@@ -168,11 +194,56 @@ describe("sanitizeContent", () => {
     }))
 
     const longContent = "a".repeat(10000)
-    await sanitizeContent(longContent, { ...CONFIG, maxContentLength: 100 }, null, noopLogger)
+    await sanitizeContent("short key", longContent, { ...CONFIG, maxContentLength: 100 }, null, noopLogger)
 
     const parsed = JSON.parse(capturedBody)
     const messageContent = parsed.messages[0].content
-    // The truncated content should be at most 100 chars from the original
     expect(messageContent.length).toBeLessThan(longContent.length)
+  })
+
+  it("uses cacheKeyContent for cache key and classificationContent for API", async () => {
+    let capturedBody = ""
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url: string, opts: any) => {
+      capturedBody = opts.body
+      return sfwResponse()
+    }))
+
+    await sanitizeContent(
+      "user text only",
+      "user text only\nassistant text\ntool results",
+      CONFIG,
+      null,
+      noopLogger
+    )
+
+    const parsed = JSON.parse(capturedBody)
+    expect(parsed.messages[0].content).toContain("assistant text")
+    expect(parsed.messages[0].content).toContain("tool results")
+  })
+
+  it("cache hit when user text same but assistant text differs", async () => {
+    const cache = new LRUCache<string, SanitizerResult>({ max: 100, ttl: 300000 })
+    const fetchMock = vi.fn().mockResolvedValue(mixedResponse())
+    vi.stubGlobal("fetch", fetchMock)
+
+    // First call: cache miss
+    await sanitizeContent("user query", "user query\nassistant response 1", CONFIG_WITH_CACHE, cache, noopLogger)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    // Second call: same user text, different assistant text → cache hit
+    const result = await sanitizeContent("user query", "user query\nassistant response 2\ntool result", CONFIG_WITH_CACHE, cache, noopLogger)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(result.cached).toBe(true)
+  })
+
+  it("sends temperature: 0 in API request", async () => {
+    let capturedBody: any = {}
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url: string, opts: any) => {
+      capturedBody = JSON.parse(opts.body)
+      return sfwResponse()
+    }))
+
+    await sanitizeContent("test", "test", CONFIG, null, noopLogger)
+    expect(capturedBody.temperature).toBe(0)
   })
 })
