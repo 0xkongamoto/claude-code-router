@@ -12,9 +12,15 @@ interface Message {
 const SANITIZED_HISTORY_PLACEHOLDER = "[Prior context]"
 
 /**
- * Sanitize ALL user messages in a conversation:
- * - Last user message: replace with cleanPrompt (via replaceLastUserMessageContent)
- * - Earlier user messages: replace non-system-reminder text blocks with a generic placeholder
+ * Sanitize user messages in a conversation:
+ * - First user message: sanitize text blocks to "[Prior context]" (contains original NSFW prompt)
+ * - Middle user messages: pass through unchanged (tool results, follow-up instructions)
+ * - Last user message: replace text block with cleanPrompt (if it has one)
+ *
+ * Only the FIRST user message needs sanitization because it contains the original
+ * NSFW text sent by the user. Subsequent user messages are either tool results
+ * (SFW, must be preserved for Claude to continue working) or follow-up instructions
+ * (already sanitized via cleanPrompt on the turn they were sent).
  */
 export function sanitizeAllUserMessages(
   messages: Message[],
@@ -24,11 +30,13 @@ export function sanitizeAllUserMessages(
     return messages
   }
 
+  // Find first and last user message indices
+  let firstUserIdx = -1
   let lastUserIdx = -1
-  for (let i = messages.length - 1; i >= 0; i--) {
+  for (let i = 0; i < messages.length; i++) {
     if (messages[i].role === "user") {
+      if (firstUserIdx === -1) firstUserIdx = i
       lastUserIdx = i
-      break
     }
   }
 
@@ -36,16 +44,21 @@ export function sanitizeAllUserMessages(
     return messages
   }
 
-  // Apply cleanPrompt to the last user message (existing behavior)
+  // Apply cleanPrompt to the last user message (replaces text block if present)
   const result = replaceLastUserMessageContent(messages, cleanPrompt)
 
-  // Sanitize all EARLIER user messages to prevent history leaking NSFW content
-  return result.map((msg, idx) => {
-    if (msg.role !== "user" || idx >= lastUserIdx) {
+  // Only sanitize the FIRST user message (original NSFW prompt)
+  // All other earlier user messages pass through unchanged
+  if (firstUserIdx !== -1 && firstUserIdx !== lastUserIdx) {
+    return result.map((msg, idx) => {
+      if (idx === firstUserIdx && msg.role === "user") {
+        return sanitizeHistoryMessage(msg)
+      }
       return msg
-    }
-    return sanitizeHistoryMessage(msg)
-  })
+    })
+  }
+
+  return result
 }
 
 function sanitizeHistoryMessage(message: Message): Message {
