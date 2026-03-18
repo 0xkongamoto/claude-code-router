@@ -53,6 +53,16 @@ export class PipelineStore {
   ): PipelineState {
     const existing = this.cache.get(sessionId)
     if (existing) {
+      // Terminal states: re-initialize for a new pipeline run within the same session
+      const isTerminal = existing.status === "apply_complete" || existing.status === "error"
+      if (isTerminal) {
+        this.logger.info(
+          { sessionId, previousStatus: existing.status },
+          "Pipeline: re-initializing session (previous run completed)"
+        )
+        return this.initSession(sessionId, nsfwSpec, classification, projectPath)
+      }
+
       this.logger.debug(
         { sessionId, status: existing.status },
         "Pipeline: session already exists, skipping re-initialization"

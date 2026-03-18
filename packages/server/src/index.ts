@@ -219,9 +219,27 @@ async function getServer(options: RunOptions = {}) {
   // Extract sessionId from metadata early so it is available in all preHandler hooks
   serverInstance.addHook("preHandler", async (req: any) => {
     if (req.body?.metadata?.user_id && !req.sessionId) {
-      const parts = req.body.metadata.user_id.split("_session_")
-      if (parts.length > 1) {
-        req.sessionId = parts[1]
+      const userId = req.body.metadata.user_id
+
+      // Format 1: JSON string with session_id field
+      // e.g. '{"device_id":"...","session_id":"f3c0aad7-..."}'
+      if (userId.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(userId)
+          if (parsed.session_id) {
+            req.sessionId = parsed.session_id
+          }
+        } catch {
+          // Not valid JSON, try other formats
+        }
+      }
+
+      // Format 2: Legacy "prefix_session_<id>" string
+      if (!req.sessionId) {
+        const parts = userId.split("_session_")
+        if (parts.length > 1) {
+          req.sessionId = parts[1]
+        }
       }
     }
   })
