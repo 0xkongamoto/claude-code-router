@@ -76,6 +76,22 @@ export class PipelineStore {
     return this.cache.get(sessionId) ?? null
   }
 
+  updateNsfwSpec(sessionId: string, nsfwSpec: NsfwSpec): PipelineState | null {
+    const existing = this.cache.get(sessionId)
+    if (!existing) {
+      this.logger.warn({ sessionId }, "Pipeline: updateNsfwSpec called for unknown session")
+      return null
+    }
+    const updated: PipelineState = {
+      ...existing,
+      nsfwSpec,
+      updatedAt: Date.now(),
+    }
+    this.cache.set(sessionId, updated)
+    this.logger.debug({ sessionId }, "Pipeline: nsfwSpec updated with image descriptions")
+    return updated
+  }
+
   setReport(sessionId: string, report: ImplementationReport): PipelineState | null {
     const existing = this.cache.get(sessionId)
     if (!existing) {

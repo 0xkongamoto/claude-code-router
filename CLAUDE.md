@@ -75,10 +75,21 @@ Agents are pluggable feature modules that can:
 - Provide custom tools (`tools`)
 
 Built-in agents:
-- **imageAgent**: Handles image-related tasks
+- **imageAgent**: Handles image-related tasks (SFW path only)
 
-Agent tool call flow:
-1. Detect and mark agents in `preHandler` hook
+Image-related utilities:
+- **imageDetection.ts**: Pure functions for detecting, replacing, and stripping image content blocks
+- **imageRouting.ts** (in `sanitizer/`): Post-classification routing — SFW path activates ImageAgent, NSFW path uses `NsfwVisionService`
+- **vision.ts** (in `sanitizer/`): Calls uncensored multimodal model to describe images as text for NSFW pipeline
+
+Agent/image hook execution order (preHandler):
+1. **Image Detection** — detect image blocks, cache metadata (do NOT activate ImageAgent)
+2. **Sanitizer** — classify SFW/NSFW
+3. **Post-classification Image Routing** — SFW → ImageAgent; NSFW → vision descriptions or strip
+4. **Non-image Agent Detection** — run all agents except ImageAgent
+
+Agent tool call flow (SFW path):
+1. ImageAgent activated via post-classification routing
 2. Add agent tools to the request
 3. Intercept tool call events in `onSend` hook
 4. Execute agent tool and initiate new LLM request
@@ -246,3 +257,26 @@ ui (standalone frontend application)
 
 - Main configuration example: Complete example in README.md
 - Custom router example: `custom-router.example.js`
+
+## Pipeline Configuration (NSFW)
+
+The `Pipeline` section in `config.json` controls the NSFW sanitizer pipeline:
+
+```json
+{
+  "Pipeline": {
+    "enabled": true,
+    "nsfwVision": {
+      "model": "uncensored-vision-model",
+      "apiKey": "$VISION_API_KEY",
+      "apiUrl": "https://api.example.com/v1/chat/completions",
+      "timeoutMs": 60000,
+      "maxTokens": 2048
+    }
+  }
+}
+```
+
+- `nsfwVision`: Optional. When configured, NSFW requests with images are described via this uncensored multimodal model before routing. When omitted, images are stripped from NSFW requests.
+- See `docs/pipeline-flow.md` for the complete pipeline architecture
+- See `docs/adr/` for architecture decision records

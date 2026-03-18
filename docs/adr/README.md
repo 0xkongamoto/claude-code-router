@@ -7,6 +7,7 @@ This directory contains Architecture Decision Records (ADRs) for Claude Code Rou
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
 | 0001 | Platform-Orchestrated Pipeline Triggering | Accepted | 2026-03-17 |
+| 0002 | Dual-path Image Processing for NSFW Pipeline | Accepted | 2026-03-18 |
 
 ## Creating a New ADR
 

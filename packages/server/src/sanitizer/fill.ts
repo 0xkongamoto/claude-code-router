@@ -154,11 +154,26 @@ export class NsfwFillService {
             .join("\n")
         : "(none)"
 
+    const imageDescriptionSection =
+      nsfwSpec.imageDescriptions && nsfwSpec.imageDescriptions.length > 0
+        ? nsfwSpec.imageDescriptions
+            .map((id) => `- Image #${id.imageIndex}: ${id.description}`)
+            .join("\n")
+        : null
+
     const user = [
       "# NSFW Specification",
       "",
       `**Theme/Context:** ${nsfwSpec.context}`,
       "",
+      ...(imageDescriptionSection
+        ? [
+            "## Image Context",
+            "The following images were present in the original request. Use these descriptions to inform your content generation:",
+            imageDescriptionSection,
+            "",
+          ]
+        : []),
       "## Code Changes Required",
       codeChangesSection,
       "",

@@ -89,10 +89,17 @@ export interface CodeChange {
   location: string
 }
 
+export interface ImageDescription {
+  imageIndex: number
+  messageIndex: number
+  description: string
+}
+
 export interface NsfwSpec {
   contentChanges: ContentChange[]
   codeChanges: CodeChange[]
   context: string
+  imageDescriptions?: ImageDescription[]
 }
 
 export interface SanitizerResult extends SwitcherResult {
@@ -262,12 +269,21 @@ export interface NsfwAgentConfig {
   retryDelayMs: number
 }
 
+export interface NsfwVisionConfig {
+  model: string
+  apiKey: string
+  apiUrl: string
+  timeoutMs: number
+  maxTokens: number
+}
+
 export interface PipelineConfig {
   enabled: boolean
   sanitizer: SanitizerModelConfig
   sfwAgent: SfwAgentConfig
   nsfwAgent: NsfwAgentConfig
   apply: ApplyConfig
+  nsfwVision?: NsfwVisionConfig
 }
 
 export interface SanitizerModelConfig {
@@ -298,6 +314,14 @@ const NSFW_AGENT_DEFAULTS: NsfwAgentConfig = {
   retryDelayMs: 3000,
 }
 
+const NSFW_VISION_DEFAULTS: NsfwVisionConfig = {
+  model: "",
+  apiKey: "",
+  apiUrl: "",
+  timeoutMs: 30000,
+  maxTokens: 2048,
+}
+
 const SANITIZER_DEFAULTS: SanitizerModelConfig = {
   model: "claude-haiku-4-5-20251001",
   apiKey: "",
@@ -321,6 +345,7 @@ export function parsePipelineConfig(
   const sfwAgentRaw = raw.sfwAgent || {}
   const nsfwAgentRaw = raw.nsfwAgent || {}
   const applyRaw = raw.apply || {}
+  const visionRaw = raw.nsfwVision || {}
 
   return {
     enabled: typeof raw.enabled === "boolean" ? raw.enabled : false,
@@ -412,5 +437,26 @@ export function parsePipelineConfig(
           ? applyRaw.maxFileSizeBytes
           : APPLY_DEFAULTS.maxFileSizeBytes,
     },
+    nsfwVision: visionRaw.model
+      ? {
+          model: typeof visionRaw.model === "string"
+            ? visionRaw.model
+            : NSFW_VISION_DEFAULTS.model,
+          apiKey: typeof visionRaw.apiKey === "string" && visionRaw.apiKey
+            ? visionRaw.apiKey
+            : NSFW_VISION_DEFAULTS.apiKey,
+          apiUrl: typeof visionRaw.apiUrl === "string"
+            ? visionRaw.apiUrl
+            : NSFW_VISION_DEFAULTS.apiUrl,
+          timeoutMs:
+            typeof visionRaw.timeoutMs === "number" && visionRaw.timeoutMs >= 1000
+              ? visionRaw.timeoutMs
+              : NSFW_VISION_DEFAULTS.timeoutMs,
+          maxTokens:
+            typeof visionRaw.maxTokens === "number" && visionRaw.maxTokens >= 128
+              ? visionRaw.maxTokens
+              : NSFW_VISION_DEFAULTS.maxTokens,
+        }
+      : undefined,
   }
 }

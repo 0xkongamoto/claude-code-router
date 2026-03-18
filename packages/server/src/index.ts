@@ -14,6 +14,9 @@ import { rewriteStream } from "./utils/rewriteStream";
 import JSON5 from "json5";
 import { IAgent, ITool } from "./agents/type";
 import agentsManager from "./agents";
+import { detectImages, stripImages } from "./agents/imageDetection";
+import { NsfwVisionService } from "./sanitizer/vision";
+import { activateImageAgentForSfw, handleNsfwImages } from "./sanitizer/imageRouting";
 import { EventEmitter } from "node:events";
 import { pluginManager, tokenSpeedPlugin } from "@musistudio/llms";
 import { Switcher, createSwitcherHook } from "./switcher";
@@ -266,36 +269,13 @@ async function getServer(options: RunOptions = {}) {
     }
   })
 
+  // Image detection: detect and store metadata only, do NOT activate ImageAgent yet.
+  // The decision to activate ImageAgent or use NsfwVisionService happens after classification.
   serverInstance.addHook("preHandler", async (req: any, reply: any) => {
-    if (req.pathname.endsWith("/v1/messages")) {
-      const useAgents = []
-
-      for (const agent of agentsManager.getAllAgents()) {
-        if (agent.shouldHandle(req, config)) {
-          // Set agent identifier
-          useAgents.push(agent.name)
-
-          // change request body
-          agent.reqHandler(req, config);
-
-          // append agent tools
-          if (agent.tools.size) {
-            if (!req.body?.tools?.length) {
-              req.body.tools = []
-            }
-            req.body.tools.unshift(...Array.from(agent.tools.values()).map(item => {
-              return {
-                name: item.name,
-                description: item.description,
-                input_schema: item.input_schema
-              }
-            }))
-          }
-        }
-      }
-
-      if (useAgents.length) {
-        req.agents = useAgents;
+    if (req.pathname?.endsWith("/v1/messages") && Array.isArray(req.body?.messages)) {
+      const detection = detectImages(req.body.messages)
+      if (detection.hasImages) {
+        req.detectedImages = detection
       }
     }
   });
@@ -326,6 +306,11 @@ async function getServer(options: RunOptions = {}) {
     ? new ApplyService(sanitizer.config.apply, serverInstance.app.log)
     : null
 
+  const visionConfig = sanitizer.isEnabled ? sanitizer.config.nsfwVision : undefined
+  const nsfwVisionService = visionConfig?.model
+    ? new NsfwVisionService(visionConfig, serverInstance.app.log)
+    : null
+
   if (sanitizer.isEnabled) {
     serverInstance.addHook("preHandler", createSanitizerHook(sanitizer, pipelineStore, serverInstance.app.log))
   } else {
@@ -334,6 +319,61 @@ async function getServer(options: RunOptions = {}) {
       serverInstance.addHook("preHandler", createSwitcherHook(switcher))
     }
   }
+
+  // Post-classification image routing: decide SFW (ImageAgent) vs NSFW (vision descriptions) path
+  serverInstance.addHook("preHandler", async (req: any, reply: any) => {
+    if (!req.detectedImages || !req.pathname?.endsWith("/v1/messages")) return
+
+    const isNsfwPipeline = !!req.sanitizerResult
+
+    if (isNsfwPipeline) {
+      // NSFW path: describe images via uncensored vision model, strip image blocks
+      await handleNsfwImages(req, req.detectedImages, nsfwVisionService, pipelineStore, serverInstance.app.log)
+    } else if (req.switcherResult?.classification === "nsfw") {
+      // NSFW without cleanPrompt (parse failure): strip images for text-only model
+      req.body = { ...req.body, messages: stripImages(req.body.messages) }
+    } else {
+      // SFW path: activate ImageAgent as before
+      activateImageAgentForSfw(req, config, req.detectedImages)
+    }
+  })
+
+  // Non-image agent detection: run all agents except ImageAgent (handled above)
+  serverInstance.addHook("preHandler", async (req: any, reply: any) => {
+    if (req.pathname?.endsWith("/v1/messages")) {
+      const useAgents: string[] = []
+
+      for (const agent of agentsManager.getAllAgents()) {
+        if (agent.name === "image") continue
+
+        if (agent.shouldHandle(req, config)) {
+          useAgents.push(agent.name)
+          agent.reqHandler(req, config)
+
+          if (agent.tools.size) {
+            if (!req.body?.tools?.length) {
+              req.body = { ...req.body, tools: [] }
+            }
+            req.body = {
+              ...req.body,
+              tools: [
+                ...Array.from(agent.tools.values()).map(item => ({
+                  name: item.name,
+                  description: item.description,
+                  input_schema: item.input_schema,
+                })),
+                ...req.body.tools,
+              ],
+            }
+          }
+        }
+      }
+
+      if (useAgents.length) {
+        req.agents = req.agents ? [...req.agents, ...useAgents] : useAgents
+      }
+    }
+  })
 
   serverInstance.addHook("onError", async (request: any, reply: any, error: any) => {
     event.emit('onError', request, reply, error);

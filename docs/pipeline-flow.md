@@ -1,6 +1,6 @@
 # NSFW Pipeline Flow: Request → Finished App
 
-**Date:** 2026-03-17 (updated)
+**Date:** 2026-03-18 (updated)
 **Log reference:** `~/.claude-code-router/logs/ccr-20260317181018.log`
 
 ---
@@ -8,9 +8,16 @@
 ## Architecture Overview
 
 ```
-User Request
+User Request (may contain images)
     │
     ▼
+┌──────────────────────────────────────────────────────────┐
+│  IMAGE DETECTION (preHandler Hook 5)                      │
+│  Detect image blocks, cache metadata on req.detectedImages│
+│  Do NOT activate ImageAgent yet                           │
+└────────────────────────┬─────────────────────────────────┘
+                         │
+                         ▼
 ┌──────────────────────────────────────────────────────────┐
 │  PHASE 1: SFW Generation                                 │
 │                                                          │
@@ -18,18 +25,36 @@ User Request
 │  │ Sanitizer  │───▶│  Replace   │───▶│  SFW Model     │  │
 │  │ (classify  │    │  Messages  │    │  (Claude Opus)  │  │
 │  │  + decomp) │    │  (clean)   │    │  generates app  │  │
-│  └────────────┘    └────────────┘    │  with {{SLOT_*}}│  │
-│   Sonnet 4.6                         │  placeholders   │  │
-│   ~2-13s (miss)                      └───────┬────────┘  │
-│   <1ms (cached)                              │           │
-│                                              ▼           │
-│                                   ┌──────────────────┐   │
-│                                   │ Report Extraction │   │
-│                                   │ (onSend hook)     │   │
-│                                   │ parse markers     │   │
-│                                   └────────┬─────────┘   │
-│                                            │             │
-└────────────────────────────────────────────┼─────────────┘
+│  └─────┬──────┘    └────────────┘    │  with {{SLOT_*}}│  │
+│        │                              │  placeholders   │  │
+│        ▼                              └───────┬────────┘  │
+│  ┌─────────────────────────────────┐          │           │
+│  │ POST-CLASSIFICATION ROUTING     │          │           │
+│  │ (preHandler Hook 7)             │          │           │
+│  │                                 │          │           │
+│  │ SFW + images:                   │          │           │
+│  │  → Activate ImageAgent as usual │          │           │
+│  │                                 │          │           │
+│  │ NSFW + images + vision OK:      │          │           │
+│  │  → Describe via uncensored      │          │           │
+│  │    vision model                 │          │           │
+│  │  → Inject into nsfwSpec         │          │           │
+│  │  → Replace images with text     │          │           │
+│  │                                 │          │           │
+│  │ NSFW + images + vision fails:   │          │           │
+│  │  → Keep images (Opus can see)   │          │           │
+│  │                                 │          │           │
+│  │ NSFW + images + no vision:      │          │           │
+│  │  → Strip images entirely        │          │           │
+│  └─────────────────────────────────┘          │           │
+│                                               ▼           │
+│                                   ┌──────────────────┐    │
+│                                   │ Report Extraction │    │
+│                                   │ (onSend hook)     │    │
+│                                   │ parse markers     │    │
+│                                   └────────┬─────────┘    │
+│                                            │              │
+└────────────────────────────────────────────┼──────────────┘
                                              │
               Auto-trigger: pipeline:reportCaptured event
               OR: POST /api/pipeline/trigger-complete
@@ -66,6 +91,9 @@ User Request
 
 | Component | File | Purpose |
 |-----------|------|---------|
+| **ImageDetection** | `server/src/agents/imageDetection.ts` | Pure functions: `detectImages()`, `replaceImagesWithDescriptions()`, `stripImages()` |
+| **NsfwVisionService** | `server/src/sanitizer/vision.ts` | Calls uncensored multimodal model to describe images as text |
+| **ImageRouting** | `server/src/sanitizer/imageRouting.ts` | Post-classification routing: SFW → ImageAgent, NSFW → vision/strip |
 | **Sanitizer** | `server/src/sanitizer/sanitizer.ts` | Classifies content (SFW/NSFW), generates cleanPrompt + nsfwSpec |
 | **SanitizerHook** | `server/src/sanitizer/index.ts` | preHandler hook — orchestrates sanitization per request, injects placeholder rules |
 | **Replace** | `server/src/sanitizer/replace.ts` | Replaces NSFW text in user messages with clean versions |
@@ -177,6 +205,68 @@ Based on classification:
 | NSFW + cleanPrompt exists | SFW provider (content is clean) | Claude Opus 4.6 |
 | NSFW + NO cleanPrompt | NSFW provider (uncensored) | MiniMax Uncensored (RunPod) |
 
+### Step 4b — Image Handling (Post-classification, preHandler Hook 7)
+
+When `req.detectedImages` is set (images were detected in Hook 5), the post-classification hook runs **after** the sanitizer:
+
+```
+req.detectedImages? ──── No ──── skip
+        │
+       Yes
+        │
+req.sanitizerResult? ── NSFW path ──┐
+        │                            │
+       SFW path                      ├── Vision available + succeeds?
+        │                            │     Yes → describe images → inject
+        ▼                            │           into nsfwSpec.imageDescriptions
+  Activate ImageAgent                │           → replace images with text
+  (existing behavior)                │     No (API error/timeout) →
+                                     │           keep images for Opus
+                                     │
+                                     ├── No vision configured?
+                                     │     → strip images entirely
+                                     │
+                                     └── req.agents NOT set (critical)
+                                           → pipeline report extraction works
+```
+
+**SFW path** replicates ImageAgent's existing two sub-paths:
+- **Path A** (images only in last message, `!forceUseImageAgent`): Route to `Router.image`, no agent activation
+- **Path B** (images in earlier messages): Call `imageAgent.reqHandler`, inject `analyzeImage` tool, set `req.agents = ["image"]`
+
+**NSFW path** — when `NsfwVisionService` is configured (`Pipeline.nsfwVision.model` is set):
+1. Calls uncensored vision model with base64 images (OpenAI-compatible `chat/completions` format)
+2. Receives text descriptions per image
+3. Attaches descriptions to `req.sanitizerResult.nsfwSpec.imageDescriptions[]`
+4. Replaces image blocks in messages with `[Image #N: <description>]` text
+5. Updates `PipelineStore` via `updateNsfwSpec()`
+6. **Does NOT set `req.agents`** — this is critical for pipeline report extraction
+
+**NSFW path** — when vision fails (API error, timeout, empty response):
+- Images are **kept in messages** (not stripped). Opus is multimodal and can see them in Phase 1.
+- Only Phase 2 (MiniMax, text-only) lacks image context — acceptable degradation.
+
+**NSFW path** — when no vision model configured:
+- Images are stripped entirely via `stripImages()`.
+
+**NsfwSpec with image descriptions** (passed to Phase 2 fill prompt):
+```typescript
+nsfwSpec: {
+  codeChanges: [...],
+  contentChanges: [...],
+  context: "Adult manga creation platform",
+  imageDescriptions: [                    // NEW — only present when vision succeeded
+    {
+      imageIndex: 1,
+      messageIndex: 0,
+      description: "UI mockup showing a manga panel editor with..."
+    }
+  ]
+}
+```
+
+See [ADR-0002](adr/0002-dual-path-image-processing-for-nsfw-pipeline.md) for the full decision record.
+
 ### Step 5 — Report Extraction (onSend hook)
 
 While streaming the response to the client, the onSend hook tees the stream:
@@ -245,6 +335,10 @@ The fill service calls an uncensored model **directly** (NOT through CCR's `/v1/
 ```
 # NSFW Specification
 **Theme/Context:** Adult trivia quiz game with progressive undressing
+
+## Image Context                          ← NEW (only when vision succeeded)
+- Image #1: UI mockup showing a game      (from nsfwSpec.imageDescriptions)
+  interface with card grid layout...
 
 ## Code Changes Required
 - {{__SLOT_001__}}: "Name of clothing item being removed"
