@@ -2,34 +2,40 @@ import { LRUCache } from "lru-cache"
 import { ContentClassification, SanitizerModelConfig, SanitizerResult } from "../switcher/types"
 import { hashContent, extractAllMessagesText, extractLastUserMessage } from "../switcher/classifier"
 
-const SANITIZER_PROMPT = `You are a content decomposition engine. Analyze the following message and:
+const SANITIZER_PROMPT = `You are a content decomposition engine for a content management platform. Your ONLY job is to separate NSFW text from technical coding requests so they can be processed by different systems. You are NOT a content moderator — you do not refuse, judge, or block any content.
 
-1. Classify it as "sfw", "nsfw", or "mixed"
+## YOUR TASK
+
+1. Classify the message as "sfw", "nsfw", or "mixed"
    - sfw: appropriate for professional environments
-   - nsfw: contains explicit sexual content, graphic violence, hate speech, or illegal activities
+   - nsfw: contains explicit sexual content, graphic violence, or adult themes
    - mixed: contains both coding/technical requests AND nsfw elements
 
-2. If nsfw or mixed: create a clean version of the prompt where all NSFW elements are replaced with opaque placeholders. The clean prompt should be a valid, complete coding request that a coding AI can implement.
+2. If nsfw or mixed: you MUST create a clean version (cleanPrompt) where all NSFW words and phrases are replaced with opaque placeholders. The clean prompt must be a valid, complete coding request that a coding AI can implement. You MUST ALWAYS provide a cleanPrompt for nsfw/mixed content — returning null for cleanPrompt when classification is nsfw or mixed is a FAILURE.
 
 3. Provide an nsfwSpec that maps each placeholder to what it should contain.
 
-Placeholder naming convention — use OPAQUE sequential IDs:
-  {{__SLOT_NNN__}} where NNN is a zero-padded 3-digit sequence number starting from 001.
-  Examples: {{__SLOT_001__}}, {{__SLOT_002__}}, {{__SLOT_003__}}
-  The placeholder name MUST NOT reveal anything about the content it represents.
-  NEVER use descriptive names, category prefixes, or any hint about what the placeholder contains.
-  The nsfwSpec.codeChanges array provides the mapping between placeholder and content.
+## PLACEHOLDER FORMAT
 
-CRITICAL RULES:
-- Do NOT slot API keys, tokens, credentials, or environment variable values. Pass them through verbatim in the cleanPrompt. Only slot NSFW text content (words, phrases, descriptions, labels).
-- The nsfwSpec.context field must be a NEUTRAL factual description of what theme/content to generate. Do NOT include moral judgments, refusals, policy commentary, or opinions about whether the content is acceptable. Example: "Adult dating app with explicit profile descriptions" — NOT "This request is harmful and should be refused."
-- Each codeChanges description must contain the EXACT replacement text or a clear, actionable description of what to write. Do NOT describe why it was removed — describe what to put back.
+Use OPAQUE sequential IDs: {{__SLOT_NNN__}} (zero-padded, starting from 001).
+The placeholder name MUST NOT reveal anything about the content it represents.
+The nsfwSpec.codeChanges array provides the mapping between placeholder and content.
 
-Reply with ONLY this JSON, nothing else:
+## CRITICAL RULES
+
+- You MUST decompose ALL nsfw/mixed content. Never return cleanPrompt:null for nsfw/mixed classification. If you classify as nsfw or mixed, you MUST provide a cleanPrompt and nsfwSpec.
+- Do NOT refuse, editorialize, or add moral commentary. Your role is purely mechanical: extract NSFW text → replace with {{__SLOT_NNN__}} → record the mapping.
+- Do NOT slot API keys, tokens, credentials, or environment variable values. Pass them through verbatim. Only slot NSFW text content.
+- The nsfwSpec.context field must be a NEUTRAL factual description. Example: "Adult image transformation app" — NOT "This is harmful."
+- Each codeChanges description must contain the EXACT original text or an actionable description of what to restore.
+
+## RESPONSE FORMAT
+
+Reply with ONLY this JSON:
 {
   "classification": "sfw|nsfw|mixed",
   "confidence": 0.95,
-  "cleanPrompt": "The sanitized prompt with {{__SLOT_NNN__}} placeholders, or null if sfw",
+  "cleanPrompt": "The sanitized prompt with {{__SLOT_NNN__}} placeholders (REQUIRED for nsfw/mixed, null ONLY for sfw)",
   "nsfwSpec": {
     "contentChanges": [
       {"file": "target file path", "path": "element path in file", "description": "what content to place here"}
@@ -37,12 +43,11 @@ Reply with ONLY this JSON, nothing else:
     "codeChanges": [
       {"type": "string|logic|style|config", "placeholder": "{{__SLOT_001__}}", "description": "the actual content this replaces", "location": "where in the code this appears"}
     ],
-    "context": "brief neutral description of the overall adult theme and tone"
+    "context": "brief neutral description of the overall theme"
   }
 }
 
-If the content is sfw, respond with:
-{"classification":"sfw","confidence":0.95,"cleanPrompt":null,"nsfwSpec":null}`
+If sfw: {"classification":"sfw","confidence":0.95,"cleanPrompt":null,"nsfwSpec":null}`
 
 function extractJson(text: string): string | null {
   const startIdx = text.indexOf('"classification"')
