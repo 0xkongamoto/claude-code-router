@@ -381,7 +381,9 @@ async function getServer(options: RunOptions = {}) {
                   const report = accumulator.addChunk(value.data.delta.text)
                   if (report && req.sessionId) {
                     pipelineStore.setReport(req.sessionId, report)
-                    event.emit('pipeline:reportCaptured', req.sessionId)
+                    // Auto-trigger with skipBuild — the platform's health check
+                    // will verify the result via HMR, no need for npm run build
+                    event.emit('pipeline:reportCaptured', req.sessionId, { skipBuild: true })
                     break
                   }
                 }
