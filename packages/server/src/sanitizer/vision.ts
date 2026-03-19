@@ -39,7 +39,8 @@ export class NsfwVisionService {
 
   async describeImages(
     images: DetectedImage[],
-    contextHint: string
+    contextHint: string,
+    requestApiKey?: string
   ): Promise<ImageDescription[]> {
     if (images.length === 0) return []
 
@@ -60,7 +61,7 @@ export class NsfwVisionService {
     )
 
     try {
-      const descriptions = await this.callVisionModel(validImages, contextHint)
+      const descriptions = await this.callVisionModel(validImages, contextHint, requestApiKey)
 
       this.logger.info(
         {
@@ -86,7 +87,8 @@ export class NsfwVisionService {
 
   private async callVisionModel(
     images: DetectedImage[],
-    contextHint: string
+    contextHint: string,
+    requestApiKey?: string
   ): Promise<ImageDescription[]> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs)
@@ -138,7 +140,7 @@ export class NsfwVisionService {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${this.config.apiKey}`,
+          "Authorization": requestApiKey || `Bearer ${this.config.apiKey}`,
         },
         body: JSON.stringify(requestBody),
         signal: controller.signal,

@@ -25,7 +25,8 @@ export class PipelineStore {
     sessionId: string,
     nsfwSpec: NsfwSpec,
     classification: ContentClassification,
-    projectPath?: string | null
+    projectPath?: string | null,
+    requestApiKey?: string
   ): PipelineState {
     const now = Date.now()
     const state: PipelineState = {
@@ -37,6 +38,7 @@ export class PipelineStore {
       applyResult: null,
       originalClassification: classification,
       projectPath: projectPath ?? null,
+      ...(requestApiKey ? { requestApiKey } : {}),
       createdAt: now,
       updatedAt: now,
     }
@@ -49,7 +51,8 @@ export class PipelineStore {
     sessionId: string,
     nsfwSpec: NsfwSpec,
     classification: ContentClassification,
-    projectPath?: string | null
+    projectPath?: string | null,
+    requestApiKey?: string
   ): PipelineState {
     const existing = this.cache.get(sessionId)
     if (existing) {
@@ -60,7 +63,7 @@ export class PipelineStore {
           { sessionId, previousStatus: existing.status },
           "Pipeline: re-initializing session (previous run completed)"
         )
-        return this.initSession(sessionId, nsfwSpec, classification, projectPath)
+        return this.initSession(sessionId, nsfwSpec, classification, projectPath, requestApiKey)
       }
 
       this.logger.debug(
@@ -69,7 +72,7 @@ export class PipelineStore {
       )
       return existing
     }
-    return this.initSession(sessionId, nsfwSpec, classification, projectPath)
+    return this.initSession(sessionId, nsfwSpec, classification, projectPath, requestApiKey)
   }
 
   getSession(sessionId: string): PipelineState | null {

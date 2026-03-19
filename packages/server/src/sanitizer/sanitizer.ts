@@ -184,7 +184,8 @@ export async function sanitizeContent(
   config: SanitizerModelConfig,
   cache: LRUCache<string, SanitizerResult> | null,
   logger: any,
-  firstUserText?: string | null
+  firstUserText?: string | null,
+  requestApiKey?: string
 ): Promise<SanitizerResult> {
   const startTime = Date.now()
 
@@ -223,11 +224,14 @@ export async function sanitizeContent(
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), config.timeoutMs)
 
+    const apiKey = requestApiKey || config.apiKey
     const response = await fetch(config.apiUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": config.apiKey,
+        ...(requestApiKey
+          ? { "x-api-key": requestApiKey, "Authorization": requestApiKey }
+          : { "x-api-key": config.apiKey }),
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({

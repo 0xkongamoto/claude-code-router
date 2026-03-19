@@ -202,7 +202,8 @@ export class NsfwFillService {
 
   async executeFill(
     nsfwSpec: NsfwSpec,
-    report: ImplementationReport
+    report: ImplementationReport,
+    requestApiKey?: string
   ): Promise<FillResult> {
     const startTime = Date.now()
     const { system, user } = this.buildFillPrompt(nsfwSpec, report)
@@ -230,7 +231,7 @@ export class NsfwFillService {
       }
 
       try {
-        const responseText = await this.callModel(system, user)
+        const responseText = await this.callModel(system, user, requestApiKey)
         const fillResult = this.parseFillResult(responseText, startTime)
         const totalReplacements = fillResult.edits.reduce(
           (sum, e) => sum + e.replacements.length,
@@ -289,7 +290,7 @@ export class NsfwFillService {
     throw lastError || new Error("NsfwFill: all attempts failed")
   }
 
-  private async callModel(system: string, user: string): Promise<string> {
+  private async callModel(system: string, user: string, requestApiKey?: string): Promise<string> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs)
 
@@ -298,7 +299,7 @@ export class NsfwFillService {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${this.config.apiKey}`,
+          "Authorization": requestApiKey || `Bearer ${this.config.apiKey}`,
         },
         body: JSON.stringify({
           model: this.config.model,

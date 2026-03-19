@@ -91,13 +91,15 @@ export async function handleNsfwImages(
   detection: ImageDetectionResult,
   visionService: NsfwVisionService | null,
   store: PipelineStore | null,
-  logger: any
+  logger: any,
+  requestApiKey?: string
 ): Promise<void> {
   if (visionService?.isAvailable) {
     const contextHint = req.sanitizerResult?.nsfwSpec?.context || "image analysis"
     const descriptions = await visionService.describeImages(
       detection.images,
-      contextHint
+      contextHint,
+      requestApiKey
     )
 
     if (descriptions.length > 0) {

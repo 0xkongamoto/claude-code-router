@@ -328,7 +328,7 @@ async function getServer(options: RunOptions = {}) {
 
     if (isNsfwPipeline) {
       // NSFW path: describe images via uncensored vision model, strip image blocks
-      await handleNsfwImages(req, req.detectedImages, nsfwVisionService, pipelineStore, serverInstance.app.log)
+      await handleNsfwImages(req, req.detectedImages, nsfwVisionService, pipelineStore, serverInstance.app.log, req.pipelineApiKey)
     } else if (req.switcherResult?.classification === "nsfw") {
       // NSFW without cleanPrompt (parse failure): strip images for text-only model
       req.body = { ...req.body, messages: stripImages(req.body.messages) }
@@ -804,9 +804,9 @@ async function getServer(options: RunOptions = {}) {
         if (!state || state.status !== 'sfw_complete') return
         if (!state.nsfwSpec || !state.implementationReport) return
 
-        // Phase 2: NSFW fill
+        // Phase 2: NSFW fill (use TK1 from request if available, fallback to config apiKey)
         pipelineStore.setStatus(sessionId, 'nsfw_in_progress')
-        const fillResult = await fillService.executeFill(state.nsfwSpec, state.implementationReport)
+        const fillResult = await fillService.executeFill(state.nsfwSpec, state.implementationReport, state.requestApiKey)
         pipelineStore.setFillResult(sessionId, fillResult)
 
         // Phase 3: Resolve projectPath + apply

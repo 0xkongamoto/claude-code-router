@@ -164,6 +164,7 @@ export interface PipelineState {
   applyResult: ApplyResult | null
   originalClassification: ContentClassification
   projectPath: string | null
+  requestApiKey?: string
   createdAt: number
   updatedAt: number
   error?: string
@@ -306,8 +307,8 @@ const SFW_AGENT_DEFAULTS: SfwAgentConfig = {
 
 const NSFW_AGENT_DEFAULTS: NsfwAgentConfig = {
   model: "NikolaSigmoid/MiniMax-M2.5-Uncensored-FP8",
-  apiKey: "d50b6ba5169ea538a71fe7b0685b755823a3746934fa3cc4k",
-  apiUrl: "https://p2b5yivc05me87-8000.proxy.runpod.net/v1/chat/completions",
+  apiKey: "",
+  apiUrl: "",
   timeoutMs: 120000,
   maxTokens: 8192,
   maxRetries: 2,
@@ -337,10 +338,15 @@ export function parsePipelineConfig(
   raw: Record<string, any>,
   fallbackApiKey?: string
 ): PipelineConfig {
+  // Pipeline.apiKey is a shared fallback for all sub-components (TK1)
+  const pipelineApiKey = typeof raw.apiKey === "string" && raw.apiKey
+    ? raw.apiKey
+    : fallbackApiKey || ""
+
   const sanitizerRaw = raw.sanitizer || {}
-  const apiKey = typeof sanitizerRaw.apiKey === "string" && sanitizerRaw.apiKey
+  const sanitizerApiKey = typeof sanitizerRaw.apiKey === "string" && sanitizerRaw.apiKey
     ? sanitizerRaw.apiKey
-    : fallbackApiKey || SANITIZER_DEFAULTS.apiKey
+    : pipelineApiKey || SANITIZER_DEFAULTS.apiKey
 
   const sfwAgentRaw = raw.sfwAgent || {}
   const nsfwAgentRaw = raw.nsfwAgent || {}
@@ -369,7 +375,7 @@ export function parsePipelineConfig(
         : NSFW_AGENT_DEFAULTS.model,
       apiKey: typeof nsfwAgentRaw.apiKey === "string" && nsfwAgentRaw.apiKey
         ? nsfwAgentRaw.apiKey
-        : NSFW_AGENT_DEFAULTS.apiKey,
+        : pipelineApiKey || NSFW_AGENT_DEFAULTS.apiKey,
       apiUrl: typeof nsfwAgentRaw.apiUrl === "string"
         ? nsfwAgentRaw.apiUrl
         : NSFW_AGENT_DEFAULTS.apiUrl,
@@ -394,7 +400,7 @@ export function parsePipelineConfig(
       model: typeof sanitizerRaw.model === "string"
         ? sanitizerRaw.model
         : SANITIZER_DEFAULTS.model,
-      apiKey,
+      apiKey: sanitizerApiKey,
       apiUrl: typeof sanitizerRaw.apiUrl === "string"
         ? sanitizerRaw.apiUrl
         : SANITIZER_DEFAULTS.apiUrl,
@@ -444,7 +450,7 @@ export function parsePipelineConfig(
             : NSFW_VISION_DEFAULTS.model,
           apiKey: typeof visionRaw.apiKey === "string" && visionRaw.apiKey
             ? visionRaw.apiKey
-            : NSFW_VISION_DEFAULTS.apiKey,
+            : pipelineApiKey || NSFW_VISION_DEFAULTS.apiKey,
           apiUrl: typeof visionRaw.apiUrl === "string"
             ? visionRaw.apiUrl
             : NSFW_VISION_DEFAULTS.apiUrl,
