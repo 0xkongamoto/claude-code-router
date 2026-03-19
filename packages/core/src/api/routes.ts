@@ -138,8 +138,10 @@ async function handleFallback(
       newBody.model = fallbackModelName.join(',');
 
       // Create new request object with updated provider and body
+      // Explicitly copy headers because Fastify Request's headers getter is not preserved by spread
       const newReq = {
         ...req,
+        headers: req.headers,
         provider: fallbackProvider,
         body: newBody,
       };
