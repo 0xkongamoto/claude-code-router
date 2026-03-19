@@ -11,3 +11,4 @@ tsconfig.tsbuildinfo
 docs/build
 docs/.docusaurus
 .claude/
+.mcp.json

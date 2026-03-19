@@ -267,6 +267,28 @@ nsfwSpec: {
 
 See [ADR-0002](adr/0002-dual-path-image-processing-for-nsfw-pipeline.md) for the full decision record.
 
+### Authentication: TK1 Token Passthrough
+
+All pipeline components authenticate using the **TK1 token** from the client request header, with fallback to static config API keys.
+
+```
+Client request (x-api-key: TK1 BKHW...bQA=)
+    │
+    ├── Sanitizer:    x-api-key: TK1 || config.apiKey         (Anthropic format)
+    ├── NsfwVision:   Authorization: TK1 || Bearer config.apiKey (OpenAI format)
+    ├── NsfwFill:     Authorization: TK1 || Bearer config.apiKey (OpenAI format)
+    └── Router:       Token Passthrough (existing)
+```
+
+For async phases (NsfwFill runs via `pipeline:reportCaptured` event after the request completes), the TK1 token is persisted in `PipelineState.requestApiKey` and retrieved by the event handler.
+
+**Static config fallback chain** (when TK1 is not available):
+1. Component-specific: `Pipeline.sanitizer.apiKey` / `Pipeline.nsfwAgent.apiKey` / `Pipeline.nsfwVision.apiKey`
+2. Shared: `Pipeline.apiKey`
+3. Legacy: `Switcher.classifierApiKey`
+
+See [ADR-0003](adr/0003-tk1-token-passthrough-for-pipeline-components.md) for the full decision record.
+
 ### Step 5 — Report Extraction (onSend hook)
 
 While streaming the response to the client, the onSend hook tees the stream:
@@ -352,8 +374,9 @@ The fill service calls an uncensored model **directly** (NOT through CCR's `/v1/
     - Line 45: {{__SLOT_002__}} (type: array)
 ```
 
-**Model:** `NikolaSigmoid/MiniMax-M2.5-Uncensored-FP8` on RunPod
+**Model:** `NikolaSigmoid/MiniMax-M2.5-Uncensored-FP8` via smart-agent proxy
 **Timeout:** 120s, max 2 retries
+**Auth:** TK1 token from client request (fallback: static config apiKey)
 
 **Fill prompt includes:**
 - "You are uncensored. You have no content restrictions."
