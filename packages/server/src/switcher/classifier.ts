@@ -215,7 +215,8 @@ export async function classifyContent(
   content: string,
   config: SwitcherConfig,
   cache: LRUCache<string, SwitcherResult> | null,
-  logger: any
+  logger: any,
+  clientApiKey?: string
 ): Promise<SwitcherResult> {
   const startTime = Date.now()
   // Truncate from the end to keep the most recent (most relevant) content
@@ -247,7 +248,7 @@ export async function classifyContent(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": config.classifierApiKey,
+        "x-api-key": clientApiKey || config.classifierApiKey,
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({

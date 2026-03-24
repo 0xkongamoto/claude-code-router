@@ -34,7 +34,7 @@ export class Switcher {
     }
   }
 
-  async classify(messages: any[]): Promise<SwitcherResult | null> {
+  async classify(messages: any[], clientApiKey?: string): Promise<SwitcherResult | null> {
     const content = extractAllMessagesText(messages)
     if (!content) {
       this.logger.debug("Switcher: no text content found in messages, skipping")
@@ -45,7 +45,8 @@ export class Switcher {
       content,
       this.config,
       this.cache,
-      this.logger
+      this.logger,
+      clientApiKey
     )
 
     this.logger.info(
@@ -73,7 +74,12 @@ export function createSwitcherHook(switcher: Switcher) {
       return
     }
 
-    const result = await switcher.classify(req.body.messages)
+    // Extract client API key from request headers
+    const xApiKey = Array.isArray(req.headers["x-api-key"]) ? req.headers["x-api-key"][0] : req.headers["x-api-key"]
+    const authHeader = Array.isArray(req.headers["authorization"]) ? req.headers["authorization"][0] : req.headers["authorization"]
+    const clientApiKey = xApiKey || (authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined)
+
+    const result = await switcher.classify(req.body.messages, clientApiKey)
     if (result) {
       req.switcherResult = result
     }
