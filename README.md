@@ -570,6 +570,99 @@ jobs:
 
 This setup allows for interesting automations, like running tasks during off-peak hours to reduce API costs.
 
+## 🔨 Build from Source
+
+If you want to build the project from source instead of installing via npm:
+
+### Prerequisites
+
+- Node.js >= 20.0.0
+- pnpm >= 8.0.0
+
+### Build CCR
+
+```bash
+git clone https://github.com/0xkongamoto/claude-code-router.git
+cd claude-code-router
+pnpm install
+pnpm build
+```
+
+After building, copy the built CLI to your global installation:
+
+```bash
+cp dist/cli.js $(npm root -g)/@musistudio/claude-code-router/dist/cli.js
+```
+
+Then restart the service:
+
+```bash
+ccr restart
+```
+
+### Build & Run Gateway
+
+The Gateway is an OpenAI-compatible proxy that converts OpenAI API format to Anthropic format and forwards requests to CCR. This allows tools that only support OpenAI API format to use CCR.
+
+```bash
+# Install dependencies (if not already done)
+cd claude-code-router
+pnpm install
+
+# Build gateway
+pnpm build:gateway
+
+# Run gateway
+node packages/gateway/dist/index.js
+```
+
+Or use dev mode (with hot reload):
+
+```bash
+pnpm dev:gateway
+```
+
+#### Gateway Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GATEWAY_PORT` | `8888` | Port the gateway listens on |
+| `CCR_URL` | `http://localhost:3456` | URL of the CCR server |
+| `LOG_LEVEL` | `info` | Log level (fatal/error/warn/info/debug/trace) |
+
+Example with custom port:
+
+```bash
+GATEWAY_PORT=9000 node packages/gateway/dist/index.js
+```
+
+#### Gateway Usage
+
+The gateway exposes OpenAI-compatible endpoints:
+
+- `GET /health` - Health check
+- `GET /v1/models` - List available models
+- `POST /v1/chat/completions` - Chat completions (OpenAI format)
+
+Example request:
+
+```bash
+curl http://localhost:8888/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key" \
+  -d '{
+    "model": "claude-opus-4-6",
+    "messages": [{"role": "user", "content": "hello"}],
+    "stream": true
+  }'
+```
+
+The gateway automatically:
+1. Converts OpenAI request format to Anthropic format
+2. Forwards the request to CCR (localhost:3456)
+3. Converts the Anthropic response back to OpenAI format
+4. Supports both streaming and non-streaming responses
+
 ## 📝 Further Reading
 
 - [Project Motivation and How It Works](blog/en/project-motivation-and-how-it-works.md)

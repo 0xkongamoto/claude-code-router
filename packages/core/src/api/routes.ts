@@ -366,9 +366,18 @@ async function sendRequestToProvider(
       fastify.log.warn(`[Token Passthrough] Provider '${provider.name}' has empty api_key, but no api key received from client!`);
     }
   }
+  // Filter out undefined values from config.headers to prevent overwriting valid auth headers
+  const configHeaders: Record<string, string> = {};
+  if (config?.headers) {
+    for (const [key, value] of Object.entries(config.headers)) {
+      if (value !== undefined && value !== "undefined") {
+        configHeaders[key] = value as string;
+      }
+    }
+  }
   const requestHeaders: Record<string, string> = {
-    ...(effectiveApiKey ? { Authorization: effectiveApiKey.includes(' ') ? effectiveApiKey : `Bearer ${effectiveApiKey}` } : {}),
-    ...(config?.headers || {}),
+    ...(effectiveApiKey ? { Authorization: effectiveApiKey.includes(' ') ? effectiveApiKey : `Bearer ${effectiveApiKey}`, "x-api-key": effectiveApiKey } : {}),
+    ...configHeaders,
   };
 
   for (const key in requestHeaders) {
