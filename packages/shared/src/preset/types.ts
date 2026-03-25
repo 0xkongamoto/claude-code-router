@@ -104,17 +104,20 @@ export interface ProviderConfig {
   [key: string]: any;
 }
 
+// Model config value: plain string or object with classification-based routing
+export type ModelConfigValue = string | { sfw?: string; nsfw?: string; heavy?: string; standard?: string };
+
 // Router configuration
 export interface RouterConfig {
-  default?: string;
-  background?: string;
-  think?: string;
-  longContext?: string;
+  default?: ModelConfigValue;
+  background?: ModelConfigValue;
+  think?: ModelConfigValue;
+  longContext?: ModelConfigValue;
   longContextThreshold?: number;
-  webSearch?: string;
+  webSearch?: ModelConfigValue;
   image?: string;
   sfw?: string;
-  [key: string]: string | number | undefined;
+  [key: string]: ModelConfigValue | number | undefined;
 }
 
 // Transformer configuration

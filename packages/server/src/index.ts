@@ -311,13 +311,15 @@ async function getServer(options: RunOptions = {}) {
     ? new NsfwVisionService(visionConfig, serverInstance.app.log)
     : null
 
+  // Pipeline mode: Sanitizer handles SFW/NSFW content safety classification
   if (sanitizer.isEnabled) {
     serverInstance.addHook("preHandler", createSanitizerHook(sanitizer, pipelineStore, serverInstance.app.log))
-  } else {
-    const switcher = new Switcher(switcherConfig, serverInstance.app.log)
-    if (switcher.isEnabled) {
-      serverInstance.addHook("preHandler", createSwitcherHook(switcher))
-    }
+  }
+
+  // Switcher: Heavy/Standard task complexity classification (independent of sanitizer)
+  const switcher = new Switcher(switcherConfig, serverInstance.app.log)
+  if (switcher.isEnabled) {
+    serverInstance.addHook("preHandler", createSwitcherHook(switcher))
   }
 
   // Post-classification image routing: decide SFW (ImageAgent) vs NSFW (vision descriptions) path
@@ -329,11 +331,10 @@ async function getServer(options: RunOptions = {}) {
     if (isNsfwPipeline) {
       // NSFW path: describe images via uncensored vision model, strip image blocks
       await handleNsfwImages(req, req.detectedImages, nsfwVisionService, pipelineStore, serverInstance.app.log, req.pipelineApiKey)
-    } else if (req.switcherResult?.classification === "nsfw") {
-      // NSFW without cleanPrompt (parse failure): strip images for text-only model
-      req.body = { ...req.body, messages: stripImages(req.body.messages) }
     } else {
-      // SFW path: activate ImageAgent as before
+      // SFW path (or no Pipeline): activate ImageAgent
+      // Note: Without Pipeline enabled, there is no NSFW classification — all content uses the SFW image path.
+      // The Switcher classifies task complexity (heavy/standard), not content safety.
       activateImageAgentForSfw(req, config, req.detectedImages)
     }
   })

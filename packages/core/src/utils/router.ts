@@ -121,18 +121,31 @@ const getProjectSpecificRouter = async (
   return undefined; // Return undefined to use original configuration
 };
 
-type ModelConfig = string | { sfw: string; nsfw: string };
+type ModelConfig = string | { sfw?: string; nsfw?: string; heavy?: string; standard?: string };
 
 function resolveModel(
   modelConfig: ModelConfig | undefined,
-  switcherResult: any | undefined
+  switcherResult: any | undefined,
+  taskClassification: any | undefined
 ): string | undefined {
   if (!modelConfig) return undefined;
   if (typeof modelConfig === "string") return modelConfig;
+
+  // Priority 1: NSFW safety classification (from sanitizer/pipeline)
   if (switcherResult?.classification === "nsfw" && modelConfig.nsfw) {
     return modelConfig.nsfw;
   }
-  return modelConfig.sfw;
+
+  // Priority 2: Task complexity classification (from switcher)
+  if (taskClassification?.classification === "heavy" && modelConfig.heavy) {
+    return modelConfig.heavy;
+  }
+  if (taskClassification?.classification === "standard" && modelConfig.standard) {
+    return modelConfig.standard;
+  }
+
+  // Priority 3: Fallback — prefer cheaper path first
+  return modelConfig.sfw || modelConfig.standard || modelConfig.heavy || modelConfig.nsfw;
 }
 
 const getUseModel = async (
@@ -167,7 +180,7 @@ const getUseModel = async (
     tokenCount > 20000;
   const tokenCountThreshold = tokenCount > longContextThreshold;
   if ((lastUsageThreshold || tokenCountThreshold) && Router?.longContext) {
-    const model = resolveModel(Router.longContext, req.switcherResult);
+    const model = resolveModel(Router.longContext, req.switcherResult, req.taskClassification);
     req.log.info(
       `Using long context model due to token count: ${tokenCount}, threshold: ${longContextThreshold}, model: ${model}`
     );
@@ -195,7 +208,7 @@ const getUseModel = async (
     req.body.model?.includes("haiku") &&
     globalRouter?.background
   ) {
-    const bgModel = resolveModel(globalRouter.background, req.switcherResult);
+    const bgModel = resolveModel(globalRouter.background, req.switcherResult, req.taskClassification);
     req.log.info(`Using background model for ${req.body.model}, model: ${bgModel}`);
     return { model: bgModel!, scenarioType: 'background' };
   }
@@ -205,16 +218,16 @@ const getUseModel = async (
     req.body.tools.some((tool: any) => tool.type?.startsWith("web_search")) &&
     Router?.webSearch
   ) {
-    return { model: resolveModel(Router.webSearch, req.switcherResult)!, scenarioType: 'webSearch' };
+    return { model: resolveModel(Router.webSearch, req.switcherResult, req.taskClassification)!, scenarioType: 'webSearch' };
   }
   // if exits thinking, use the think model
   if (req.body.thinking && Router?.think) {
-    const thinkModel = resolveModel(Router.think, req.switcherResult);
+    const thinkModel = resolveModel(Router.think, req.switcherResult, req.taskClassification);
     req.log.info(`Using think model for ${req.body.thinking}, model: ${thinkModel}`);
     return { model: thinkModel!, scenarioType: 'think' };
   }
 
-  return { model: resolveModel(Router?.default, req.switcherResult)!, scenarioType: 'default' };
+  return { model: resolveModel(Router?.default, req.switcherResult, req.taskClassification)!, scenarioType: 'default' };
 };
 
 export interface RouterContext {

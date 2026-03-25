@@ -4,6 +4,14 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { useConfig } from "./ConfigProvider";
 import { Combobox } from "./ui/combobox";
+import type { ModelConfigValue } from "@/types";
+
+// Extract display string from ModelConfigValue (object configs require JSON editing)
+function toDisplayString(value: ModelConfigValue | undefined): string {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  return value.sfw || value.heavy || value.standard || value.nsfw || "";
+}
 
 export function Router() {
   const { t } = useTranslation();
@@ -74,7 +82,7 @@ export function Router() {
           <Label>{t("router.default")}</Label>
           <Combobox
             options={modelOptions}
-            value={routerConfig.default || ""}
+            value={toDisplayString(routerConfig.default)}
             onChange={(value) => handleRouterChange("default", value)}
             placeholder={t("router.selectModel")}
             searchPlaceholder={t("router.searchModel")}
@@ -85,7 +93,7 @@ export function Router() {
           <Label>{t("router.background")}</Label>
           <Combobox
             options={modelOptions}
-            value={routerConfig.background || ""}
+            value={toDisplayString(routerConfig.background)}
             onChange={(value) => handleRouterChange("background", value)}
             placeholder={t("router.selectModel")}
             searchPlaceholder={t("router.searchModel")}
@@ -96,7 +104,7 @@ export function Router() {
           <Label>{t("router.think")}</Label>
           <Combobox
             options={modelOptions}
-            value={routerConfig.think || ""}
+            value={toDisplayString(routerConfig.think)}
             onChange={(value) => handleRouterChange("think", value)}
             placeholder={t("router.selectModel")}
             searchPlaceholder={t("router.searchModel")}
@@ -109,7 +117,7 @@ export function Router() {
               <Label>{t("router.longContext")}</Label>
               <Combobox
                 options={modelOptions}
-                value={routerConfig.longContext || ""}
+                value={toDisplayString(routerConfig.longContext)}
                 onChange={(value) => handleRouterChange("longContext", value)}
                 placeholder={t("router.selectModel")}
                 searchPlaceholder={t("router.searchModel")}
@@ -131,7 +139,7 @@ export function Router() {
           <Label>{t("router.webSearch")}</Label>
           <Combobox
             options={modelOptions}
-            value={routerConfig.webSearch || ""}
+            value={toDisplayString(routerConfig.webSearch)}
             onChange={(value) => handleRouterChange("webSearch", value)}
             placeholder={t("router.selectModel")}
             searchPlaceholder={t("router.searchModel")}

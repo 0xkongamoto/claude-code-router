@@ -338,27 +338,35 @@ async function sendRequestToProvider(
 
   // Send HTTP request
   // Prepare headers
-  // Token passthrough: if provider.apiKey is empty, forward x-api-key from incoming request
-  // Claude Code always sends ANTHROPIC_API_KEY via x-api-key header
+  // Token passthrough: if provider.apiKey is empty, forward auth from incoming request
+  // Claude Code sends x-api-key; other clients (Postman, curl) may send Authorization
   let effectiveApiKey = provider.apiKey;
   const clientXApiKeyRaw = context?.req?.headers?.["x-api-key"];
   const clientXApiKey = Array.isArray(clientXApiKeyRaw) ? clientXApiKeyRaw[0] : clientXApiKeyRaw;
 
-  if (clientXApiKey) {
-    const maskToken = clientXApiKey.length > 8
-      ? `${clientXApiKey.substring(0, 8)}...${clientXApiKey.substring(clientXApiKey.length - 4)}`
+  // Also check Authorization header as fallback (strip "Bearer " prefix)
+  const clientAuthRaw = context?.req?.headers?.["authorization"];
+  const clientAuth = Array.isArray(clientAuthRaw) ? clientAuthRaw[0] : clientAuthRaw;
+  const clientAuthKey = clientAuth?.startsWith("Bearer ") ? clientAuth.slice(7) : clientAuth;
+
+  // Effective client token: prefer x-api-key, fallback to Authorization
+  const clientToken = clientXApiKey || clientAuthKey;
+
+  if (clientToken) {
+    const maskToken = clientToken.length > 8
+      ? `${clientToken.substring(0, 8)}...${clientToken.substring(clientToken.length - 4)}`
       : "***";
-    fastify.log.info(`[Debug] Incoming request has x-api-key: ${maskToken}`);
+    fastify.log.info(`[Debug] Incoming request has client token: ${maskToken} (source: ${clientXApiKey ? "x-api-key" : "authorization"})`);
   } else {
-    fastify.log.info(`[Debug] Incoming request does NOT have x-api-key header`);
+    fastify.log.info(`[Debug] Incoming request has no client token (no x-api-key or authorization header)`);
   }
 
   if (!effectiveApiKey) {
-    if (clientXApiKey) {
-      effectiveApiKey = clientXApiKey;
-      fastify.log.info(`[Token Passthrough] Using client x-api-key for provider '${provider.name}'`);
+    if (clientToken) {
+      effectiveApiKey = clientToken;
+      fastify.log.info(`[Token Passthrough] Using client token for provider '${provider.name}'`);
     } else {
-      fastify.log.warn(`[Token Passthrough] Provider '${provider.name}' has empty api_key, but no x-api-key header received from client!`);
+      fastify.log.warn(`[Token Passthrough] Provider '${provider.name}' has empty api_key, and no client token received!`);
     }
   }
   const requestHeaders: Record<string, string> = {
@@ -366,8 +374,16 @@ async function sendRequestToProvider(
     ...(config?.headers || {}),
   };
 
+  // Token passthrough: ensure client token overrides empty auth headers set by transformers
+  // (e.g., Anthropic transformer auth() overwrites x-api-key with empty provider.apiKey)
+  if (!provider.apiKey && clientToken) {
+    requestHeaders["x-api-key"] = clientToken;
+    requestHeaders["Authorization"] = clientToken.includes(' ') ? clientToken : `Bearer ${clientToken}`;
+  }
+
+  // Clean up undefined header values (transformers may set headers to undefined)
   for (const key in requestHeaders) {
-    if (requestHeaders[key] === "undefined") {
+    if (requestHeaders[key] === undefined || requestHeaders[key] === "undefined") {
       delete requestHeaders[key];
     } else if (
       ["authorization", "Authorization"].includes(key) &&

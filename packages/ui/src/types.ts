@@ -11,13 +11,15 @@ export interface Provider {
   transformer?: ProviderTransformer;
 }
 
+export type ModelConfigValue = string | { sfw?: string; nsfw?: string; heavy?: string; standard?: string };
+
 export interface RouterConfig {
-    default: string;
-    background: string;
-    think: string;
-    longContext: string;
+    default: ModelConfigValue;
+    background: ModelConfigValue;
+    think: ModelConfigValue;
+    longContext: ModelConfigValue;
     longContextThreshold: number;
-    webSearch: string;
+    webSearch: ModelConfigValue;
     image: string;
     custom?: any;
 }

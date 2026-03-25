@@ -1,11 +1,11 @@
 import { LRUCache } from "lru-cache"
-import { parseSwitcherConfig, SwitcherConfig, SwitcherResult } from "./types"
+import { parseSwitcherConfig, SwitcherConfig, TaskClassificationResult } from "./types"
 import { classifyContent, extractAllMessagesText } from "./classifier"
 
 export class Switcher {
   readonly config: SwitcherConfig
   readonly isEnabled: boolean
-  private readonly cache: LRUCache<string, SwitcherResult> | null
+  private readonly cache: LRUCache<string, TaskClassificationResult> | null
   private readonly logger: any
 
   constructor(rawConfig: Record<string, any>, parentLogger: any) {
@@ -14,7 +14,7 @@ export class Switcher {
     this.logger = parentLogger.child({ module: "switcher" })
 
     if (this.isEnabled && this.config.cacheEnabled) {
-      this.cache = new LRUCache<string, SwitcherResult>({
+      this.cache = new LRUCache<string, TaskClassificationResult>({
         max: this.config.cacheMaxSize,
         ttl: this.config.cacheTtlMs,
       })
@@ -34,7 +34,7 @@ export class Switcher {
     }
   }
 
-  async classify(messages: any[]): Promise<SwitcherResult | null> {
+  async classify(messages: any[], requestApiKey?: string): Promise<TaskClassificationResult | null> {
     const content = extractAllMessagesText(messages)
     if (!content) {
       this.logger.debug("Switcher: no text content found in messages, skipping")
@@ -45,7 +45,8 @@ export class Switcher {
       content,
       this.config,
       this.cache,
-      this.logger
+      this.logger,
+      requestApiKey
     )
 
     this.logger.info(
@@ -73,11 +74,15 @@ export function createSwitcherHook(switcher: Switcher) {
       return
     }
 
-    const result = await switcher.classify(req.body.messages)
+    const requestApiKey: string | undefined =
+      req.headers?.["x-api-key"] || req.headers?.authorization || undefined
+
+    const result = await switcher.classify(req.body.messages, requestApiKey)
     if (result) {
-      req.switcherResult = result
+      req.taskClassification = result
     }
   }
 }
 
+export type { TaskClassificationResult, TaskClassification } from "./types"
 export type { SwitcherResult, SwitcherConfig, ContentClassification } from "./types"

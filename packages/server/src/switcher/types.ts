@@ -7,6 +7,15 @@ export interface SwitcherResult {
   latencyMs: number
 }
 
+export type TaskClassification = "heavy" | "standard"
+
+export interface TaskClassificationResult {
+  classification: TaskClassification
+  confidence: number
+  cached: boolean
+  latencyMs: number
+}
+
 export interface SwitcherConfig {
   enabled: boolean
   classifierModel: string
@@ -17,7 +26,7 @@ export interface SwitcherConfig {
   cacheTtlMs: number
   cacheMaxSize: number
   maxContentLength: number
-  fallbackClassification: ContentClassification
+  fallbackClassification: TaskClassification
 }
 
 const DEFAULTS: SwitcherConfig = {
@@ -30,7 +39,7 @@ const DEFAULTS: SwitcherConfig = {
   cacheTtlMs: 300000,
   cacheMaxSize: 500,
   maxContentLength: 2000,
-  fallbackClassification: "sfw",
+  fallbackClassification: "standard",
 }
 
 export function parseSwitcherConfig(raw: Record<string, any>): SwitcherConfig {
@@ -70,7 +79,7 @@ export function parseSwitcherConfig(raw: Record<string, any>): SwitcherConfig {
         ? raw.maxContentLength
         : DEFAULTS.maxContentLength,
     fallbackClassification:
-      fallback === "sfw" || fallback === "nsfw" || fallback === "mixed"
+      fallback === "heavy" || fallback === "standard"
         ? fallback
         : DEFAULTS.fallbackClassification,
   }

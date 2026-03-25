@@ -1,6 +1,6 @@
 import { createHash } from "crypto"
 import { LRUCache } from "lru-cache"
-import { ContentClassification, SwitcherConfig, SwitcherResult } from "./types"
+import { TaskClassification, SwitcherConfig, TaskClassificationResult } from "./types"
 
 interface ContentBlock {
   type: string
@@ -31,12 +31,13 @@ export function stripSystemContent(text: string): string {
   return stripped.trim()
 }
 
-const CLASSIFIER_PROMPT = `Classify the following conversation as "sfw" or "nsfw".
+const CLASSIFIER_PROMPT = `Classify the following coding assistant conversation by task complexity as "heavy" or "standard".
 
-NSFW = explicit sexual content, graphic violence, hate speech, illegal activities, or inappropriate in a professional environment.
+HEAVY = coding tasks, code generation, data analysis, image-related requests, debugging, refactoring, architecture decisions, multi-step reasoning, complex problem solving, file editing, test writing.
+STANDARD = basic questions, simple chat, one-line answers, greetings, status checks, clarifications, simple explanations.
 
 Reply with ONLY this JSON, nothing else:
-{"classification":"sfw","confidence":0.95}`
+{"classification":"<heavy_or_standard>","confidence":<0_to_1>}`
 
 export function extractFirstUserMessage(messages: Message[]): string | null {
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -157,15 +158,15 @@ function extractJson(text: string): string | null {
 
 function parseClassifierResponse(
   responseText: string,
-  fallback: ContentClassification,
+  fallback: TaskClassification,
   logger: any
-): { classification: ContentClassification; confidence: number } {
+): { classification: TaskClassification; confidence: number } {
   // First try direct parse
   try {
     const parsed = JSON.parse(responseText)
     if (parsed.classification) {
       return {
-        classification: parsed.classification === "nsfw" ? "nsfw" : "sfw",
+        classification: parsed.classification === "heavy" ? "heavy" : "standard",
         confidence: typeof parsed.confidence === "number"
           ? Math.max(0, Math.min(1, parsed.confidence))
           : 0.5,
@@ -181,7 +182,7 @@ function parseClassifierResponse(
     try {
       const parsed = JSON.parse(jsonStr)
       return {
-        classification: parsed.classification === "nsfw" ? "nsfw" : "sfw",
+        classification: parsed.classification === "heavy" ? "heavy" : "standard",
         confidence: typeof parsed.confidence === "number"
           ? Math.max(0, Math.min(1, parsed.confidence))
           : 0.5,
@@ -196,12 +197,12 @@ function parseClassifierResponse(
 
   // Last resort: check for keywords
   const lower = responseText.toLowerCase()
-  if (lower.includes('"nsfw"') || lower.includes("'nsfw'")) {
+  if (lower.includes('"heavy"') || lower.includes("'heavy'")) {
     logger.warn(
       { responseText },
-      "Switcher: JSON parse failed, detected nsfw keyword"
+      "Switcher: JSON parse failed, detected heavy keyword"
     )
-    return { classification: "nsfw", confidence: 0.5 }
+    return { classification: "heavy", confidence: 0.5 }
   }
 
   logger.warn(
@@ -214,9 +215,10 @@ function parseClassifierResponse(
 export async function classifyContent(
   content: string,
   config: SwitcherConfig,
-  cache: LRUCache<string, SwitcherResult> | null,
-  logger: any
-): Promise<SwitcherResult> {
+  cache: LRUCache<string, TaskClassificationResult> | null,
+  logger: any,
+  requestApiKey?: string
+): Promise<TaskClassificationResult> {
   const startTime = Date.now()
   // Truncate from the end to keep the most recent (most relevant) content
   const truncated = content.length > config.maxContentLength
@@ -243,11 +245,15 @@ export async function classifyContent(
       config.timeoutMs
     )
 
+    // Normalize: strip Bearer prefix for x-api-key, ensure Bearer prefix for Authorization
+    const bareKey = requestApiKey?.startsWith("Bearer ") ? requestApiKey.slice(7) : requestApiKey
     const response = await fetch(config.classifierApiUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": config.classifierApiKey,
+        ...(bareKey
+          ? { "x-api-key": bareKey, "Authorization": `Bearer ${bareKey}` }
+          : { "x-api-key": config.classifierApiKey }),
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
@@ -290,7 +296,7 @@ export async function classifyContent(
       logger
     )
 
-    const result: SwitcherResult = {
+    const result: TaskClassificationResult = {
       classification,
       confidence,
       cached: false,
