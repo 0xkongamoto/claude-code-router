@@ -61,13 +61,18 @@ export async function createGateway(config: GatewayConfig): Promise<FastifyInsta
       const errorText = await ccrResponse.text();
       req.log.error(`CCR error (${ccrResponse.status}): ${errorText}`);
       reply.status(ccrResponse.status);
-      return {
-        error: {
-          message: `CCR error: ${errorText}`,
-          type: "api_error",
-          code: "ccr_error",
-        },
-      };
+      // Forward the error as-is from CCR/provider
+      try {
+        return JSON.parse(errorText);
+      } catch {
+        return {
+          error: {
+            message: errorText,
+            type: "api_error",
+            code: "ccr_error",
+          },
+        };
+      }
     }
 
     if (!isStream) {

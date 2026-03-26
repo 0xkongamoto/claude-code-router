@@ -1,7 +1,7 @@
 import { createGateway, GatewayConfig } from "./server";
 
 const config: GatewayConfig = {
-  port: parseInt(process.env.GATEWAY_PORT || "8888", 10),
+  port: parseInt(process.env.GATEWAY_PORT || "8686", 10),
   ccrUrl: process.env.CCR_URL || "http://localhost:3456",
   logLevel: process.env.LOG_LEVEL || "info",
 };

@@ -432,17 +432,19 @@ async function sendRequestToProvider(
     fastify.log
   );
 
-  // Handle request errors
+  // Handle request errors - forward provider error as-is
   if (!response.ok) {
     const errorText = await response.text();
     fastify.log.error(
       `[provider_response_error] Error from provider(${provider.name},${requestBody.model}: ${response.status}): ${errorText}`,
     );
-    throw createApiError(
-      `Error from provider(${provider.name},${requestBody.model}: ${response.status}): ${errorText}`,
+    const apiError = createApiError(
+      errorText,
       response.status,
       "provider_response_error"
-    );
+    ) as any;
+    apiError.rawProviderError = errorText;
+    throw apiError;
   }
 
   return response;

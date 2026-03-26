@@ -27,9 +27,28 @@ export async function errorHandler(
   request.log.error(error);
 
   const statusCode = error.statusCode || 500;
+
+  // If we have a raw provider error, forward it as-is
+  if ((error as any).rawProviderError) {
+    const raw = (error as any).rawProviderError;
+    try {
+      const parsed = JSON.parse(raw);
+      return reply.code(statusCode).send(parsed);
+    } catch {
+      // If not valid JSON, wrap minimally
+      return reply.code(statusCode).send({
+        error: {
+          message: raw,
+          type: "api_error",
+          code: "provider_response_error",
+        },
+      });
+    }
+  }
+
   const response = {
     error: {
-      message: error.message + error.stack || "Internal Server Error",
+      message: error.message || "Internal Server Error",
       type: error.type || "api_error",
       code: error.code || "internal_error",
     },

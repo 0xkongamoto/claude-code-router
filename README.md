@@ -600,6 +600,76 @@ Then restart the service:
 ccr restart
 ```
 
+### Run with PM2
+
+You can use [PM2](https://pm2.keymetrics.io/) to run CCR and Gateway as managed background processes with auto-restart, log management, and monitoring.
+
+#### Install PM2
+
+```bash
+npm install -g pm2
+```
+
+#### Start CCR with PM2
+
+```bash
+# Start CCR (uses the globally installed ccr binary)
+pm2 start ccr --name ccr -- start
+
+# Or if running from source
+pm2 start node --name ccr -- packages/server/dist/index.js
+```
+
+#### Build & Start Gateway with PM2
+
+```bash
+# Build gateway first
+cd claude-code-router
+pnpm build:gateway
+
+# Start with PM2
+GATEWAY_PORT=8686 CCR_URL=http://localhost:3456 \
+  pm2 start packages/gateway/dist/index.js --name gateway
+```
+
+#### Common PM2 Commands
+
+```bash
+pm2 list                # List all processes
+pm2 restart ccr         # Restart CCR
+pm2 restart gateway     # Restart Gateway
+pm2 restart ccr gateway # Restart both
+pm2 stop ccr            # Stop CCR
+pm2 delete ccr          # Remove CCR from PM2
+pm2 logs ccr            # View CCR logs
+pm2 logs gateway        # View Gateway logs
+pm2 monit               # Monitor all processes
+```
+
+#### Persist PM2 Processes on Reboot
+
+```bash
+pm2 save                # Save current process list
+pm2 startup             # Generate startup script
+```
+
+After running `pm2 startup`, follow the output instructions to enable auto-start on system boot.
+
+#### Rebuild & Restart Workflow
+
+When you modify source code, rebuild and restart:
+
+```bash
+cd claude-code-router
+pnpm build
+
+# Copy CCR build to global installation (if using global ccr)
+cp dist/cli.js $(npm root -g)/@musistudio/claude-code-router/dist/cli.js
+
+# Restart both services
+pm2 restart ccr gateway
+```
+
 ### Build & Run Gateway
 
 The Gateway is an OpenAI-compatible proxy that converts OpenAI API format to Anthropic format and forwards requests to CCR. This allows tools that only support OpenAI API format to use CCR.
@@ -626,7 +696,7 @@ pnpm dev:gateway
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GATEWAY_PORT` | `8888` | Port the gateway listens on |
+| `GATEWAY_PORT` | `8686` | Port the gateway listens on |
 | `CCR_URL` | `http://localhost:3456` | URL of the CCR server |
 | `LOG_LEVEL` | `info` | Log level (fatal/error/warn/info/debug/trace) |
 
