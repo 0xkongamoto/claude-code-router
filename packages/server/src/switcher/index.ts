@@ -74,6 +74,11 @@ export function createSwitcherHook(switcher: Switcher) {
       return
     }
 
+    // Skip classification when forced_model is specified (router handles routing directly)
+    if (req.body?.forced_model && typeof req.body.forced_model === "string") {
+      return
+    }
+
     const requestApiKey: string | undefined =
       req.headers?.["x-api-key"] || req.headers?.authorization || undefined
 

@@ -158,6 +158,20 @@ const getUseModel = async (
   const providers = configService.get<any[]>("providers") || [];
   const Router = projectSpecificRouter || configService.get("Router");
 
+  // Forced model: bypass all routing when a valid forced_model is specified
+  const forcedModels = configService.get<Record<string, string>>("ForcedModels");
+  const forcedModel = req.body?.forced_model;
+  if (forcedModel && typeof forcedModel === "string" && forcedModels?.[forcedModel]) {
+    const model = forcedModels[forcedModel];
+    req.log.info(`Using forced model: ${forcedModel} -> ${model}`);
+    delete req.body.forced_model;
+    return { model, scenarioType: 'default' };
+  }
+  // Clean up invalid/empty forced_model to prevent it from being sent to the provider
+  if (req.body?.forced_model !== undefined) {
+    delete req.body.forced_model;
+  }
+
   if (req.body.model.includes(",")) {
     const [provider, model] = req.body.model.split(",");
     const finalProvider = providers.find(
