@@ -18,6 +18,10 @@ The user's prompt contains \`{{__SLOT_NNN__}}\` placeholders. A post-processing 
 3. Do NOT remove, skip, or rewrite any placeholder — every single one must be present in the final code
 4. Place each placeholder in the correct code location: string literals, JSX text, config values, variable assignments, etc.
 5. If a placeholder appears in quotes in the prompt, keep it in quotes in the code: \`"{{__SLOT_001__}}"\`
+6. **JSX/TSX CRITICAL:** In JSX children or attributes, ALWAYS wrap placeholders as string expressions: \`{"{{__SLOT_001__}}"}\`. Bare \`{{__SLOT_001__}}\` in JSX causes TypeScript to parse it as \`{ {__SLOT_001__} }\` (object shorthand), which is a lint error. This rule applies to ALL .tsx files.
+   - JSX text: \`<span>{"{{__SLOT_001__}}"}</span>\` ✅  NOT \`<span>{{__SLOT_001__}}</span>\` ❌
+   - JSX attr: \`<div title={"{{__SLOT_001__}}"} />\` ✅  NOT \`<div title={{__SLOT_001__}} />\` ❌
+   - JS variable: \`const x = "{{__SLOT_001__}}"\` ✅ (no wrapping needed outside JSX)
 
 **WHAT HAPPENS IF YOU BREAK THESE RULES:**
 - The post-processing system will FAIL because it searches for the exact \`{{__SLOT_NNN__}}\` strings in your output files
