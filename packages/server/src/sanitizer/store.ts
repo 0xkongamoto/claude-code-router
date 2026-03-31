@@ -26,13 +26,15 @@ export class PipelineStore {
     nsfwSpec: NsfwSpec,
     classification: ContentClassification,
     projectPath?: string | null,
-    requestApiKey?: string
+    requestApiKey?: string,
+    cleanPrompt?: string | null
   ): PipelineState {
     const now = Date.now()
     const state: PipelineState = {
       sessionId,
       status: "sfw_in_progress",
       nsfwSpec,
+      cleanPrompt: cleanPrompt ?? null,
       implementationReport: null,
       fillResult: null,
       applyResult: null,
@@ -52,7 +54,8 @@ export class PipelineStore {
     nsfwSpec: NsfwSpec,
     classification: ContentClassification,
     projectPath?: string | null,
-    requestApiKey?: string
+    requestApiKey?: string,
+    cleanPrompt?: string | null
   ): PipelineState {
     const existing = this.cache.get(sessionId)
     if (existing) {
@@ -63,7 +66,7 @@ export class PipelineStore {
           { sessionId, previousStatus: existing.status },
           "Pipeline: re-initializing session (previous run completed)"
         )
-        return this.initSession(sessionId, nsfwSpec, classification, projectPath, requestApiKey)
+        return this.initSession(sessionId, nsfwSpec, classification, projectPath, requestApiKey, cleanPrompt)
       }
 
       this.logger.debug(
@@ -72,7 +75,7 @@ export class PipelineStore {
       )
       return existing
     }
-    return this.initSession(sessionId, nsfwSpec, classification, projectPath, requestApiKey)
+    return this.initSession(sessionId, nsfwSpec, classification, projectPath, requestApiKey, cleanPrompt)
   }
 
   getSession(sessionId: string): PipelineState | null {

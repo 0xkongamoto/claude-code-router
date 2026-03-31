@@ -170,6 +170,62 @@ export function createSanitizerHook(sanitizer: Sanitizer, store: PipelineStore |
       return
     }
 
+    // API failure fallback: if the sanitizer API failed (confidence 0, no cache hit)
+    // but we have a known NSFW session in the pipeline store, use the stored
+    // cleanPrompt to sanitize messages instead of forwarding NSFW content as-is.
+    if (
+      result.confidence === 0 &&
+      !result.cached &&
+      result.originalClassification === "sfw" &&
+      store &&
+      req.sessionId
+    ) {
+      const existingSession = store.getSession(req.sessionId)
+      if (
+        existingSession &&
+        (existingSession.originalClassification === "nsfw" || existingSession.originalClassification === "mixed") &&
+        existingSession.cleanPrompt
+      ) {
+        const hookLogger = logger || sanitizer["logger"]
+        hookLogger.warn(
+          { sessionId: req.sessionId, storedClassification: existingSession.originalClassification },
+          "Sanitizer: API failed, using session-cached NSFW classification and cleanPrompt"
+        )
+
+        req.body.messages = sanitizeAllUserMessages(
+          req.body.messages,
+          existingSession.cleanPrompt
+        )
+
+        req.switcherResult = {
+          classification: "sfw",
+          confidence: existingSession.originalClassification === "nsfw" ? 0.98 : 0.9,
+          cached: true,
+          latencyMs: result.latencyMs,
+        }
+
+        req.sanitizerResult = {
+          ...result,
+          originalClassification: existingSession.originalClassification,
+          cleanPrompt: existingSession.cleanPrompt,
+          nsfwSpec: existingSession.nsfwSpec,
+        }
+
+        if (typeof req.body.system === "string") {
+          req.body.system = req.body.system + reportInstruction
+        } else if (Array.isArray(req.body.system)) {
+          req.body.system = [
+            ...req.body.system,
+            { type: "text", text: reportInstruction },
+          ]
+        } else {
+          req.body.system = reportInstruction.trim()
+        }
+
+        return
+      }
+    }
+
     if (result.originalClassification === "sfw") {
       // SFW: pass through without modification
       req.switcherResult = {
@@ -218,7 +274,7 @@ export function createSanitizerHook(sanitizer: Sanitizer, store: PipelineStore |
       // Initialize pipeline state for this session
       if (store && req.sessionId && result.nsfwSpec) {
         const projectPath = extractProjectPath(req.body.system)
-        store.initSessionIfNeeded(req.sessionId, result.nsfwSpec, result.originalClassification, projectPath, requestApiKey)
+        store.initSessionIfNeeded(req.sessionId, result.nsfwSpec, result.originalClassification, projectPath, requestApiKey, result.cleanPrompt)
       }
 
       // Log nsfwSpec for manual retrieval

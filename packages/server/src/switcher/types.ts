@@ -159,6 +159,7 @@ export interface PipelineState {
   sessionId: string
   status: PipelineStatus
   nsfwSpec: NsfwSpec | null
+  cleanPrompt: string | null
   implementationReport: ImplementationReport | null
   fillResult: FillResult | null
   applyResult: ApplyResult | null

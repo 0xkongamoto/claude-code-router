@@ -39,6 +39,7 @@ describe("PipelineStore", () => {
       expect(state.applyResult).toBeNull()
       expect(state.fillResult).toBeNull()
       expect(state.projectPath).toBeNull()
+      expect(state.cleanPrompt).toBeNull()
       expect(state.status).toBe("sfw_in_progress")
     })
 
@@ -47,6 +48,20 @@ describe("PipelineStore", () => {
       const state = store.initSession("s1", SPEC, "nsfw", "/home/user/project")
 
       expect(state.projectPath).toBe("/home/user/project")
+    })
+
+    it("stores cleanPrompt when provided", () => {
+      const store = new PipelineStore(10, 60000, noopLogger)
+      const state = store.initSession("s1", SPEC, "nsfw", null, undefined, "Build a clean app")
+
+      expect(state.cleanPrompt).toBe("Build a clean app")
+    })
+
+    it("defaults cleanPrompt to null when omitted", () => {
+      const store = new PipelineStore(10, 60000, noopLogger)
+      const state = store.initSession("s1", SPEC, "nsfw")
+
+      expect(state.cleanPrompt).toBeNull()
     })
   })
 
