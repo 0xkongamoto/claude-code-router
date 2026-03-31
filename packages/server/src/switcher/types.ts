@@ -165,6 +165,7 @@ export interface PipelineState {
   applyResult: ApplyResult | null
   originalClassification: ContentClassification
   projectPath: string | null
+  projectId: string | null
   requestApiKey?: string
   createdAt: number
   updatedAt: number

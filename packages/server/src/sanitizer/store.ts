@@ -27,7 +27,8 @@ export class PipelineStore {
     classification: ContentClassification,
     projectPath?: string | null,
     requestApiKey?: string,
-    cleanPrompt?: string | null
+    cleanPrompt?: string | null,
+    projectId?: string | null
   ): PipelineState {
     const now = Date.now()
     const state: PipelineState = {
@@ -40,12 +41,13 @@ export class PipelineStore {
       applyResult: null,
       originalClassification: classification,
       projectPath: projectPath ?? null,
+      projectId: projectId ?? null,
       ...(requestApiKey ? { requestApiKey } : {}),
       createdAt: now,
       updatedAt: now,
     }
     this.cache.set(sessionId, state)
-    this.logger.info({ sessionId, classification, projectPath: projectPath ?? null }, "Pipeline: session initialized")
+    this.logger.info({ sessionId, projectId: projectId ?? null, classification, projectPath: projectPath ?? null }, "Pipeline: session initialized")
     return state
   }
 
@@ -55,7 +57,8 @@ export class PipelineStore {
     classification: ContentClassification,
     projectPath?: string | null,
     requestApiKey?: string,
-    cleanPrompt?: string | null
+    cleanPrompt?: string | null,
+    projectId?: string | null
   ): PipelineState {
     const existing = this.cache.get(sessionId)
     if (existing) {
@@ -63,19 +66,19 @@ export class PipelineStore {
       const isTerminal = existing.status === "apply_complete" || existing.status === "error"
       if (isTerminal) {
         this.logger.info(
-          { sessionId, previousStatus: existing.status },
+          { sessionId, projectId: projectId ?? existing.projectId, previousStatus: existing.status },
           "Pipeline: re-initializing session (previous run completed)"
         )
-        return this.initSession(sessionId, nsfwSpec, classification, projectPath, requestApiKey, cleanPrompt)
+        return this.initSession(sessionId, nsfwSpec, classification, projectPath, requestApiKey, cleanPrompt, projectId)
       }
 
       this.logger.debug(
-        { sessionId, status: existing.status },
+        { sessionId, projectId: existing.projectId, status: existing.status },
         "Pipeline: session already exists, skipping re-initialization"
       )
       return existing
     }
-    return this.initSession(sessionId, nsfwSpec, classification, projectPath, requestApiKey, cleanPrompt)
+    return this.initSession(sessionId, nsfwSpec, classification, projectPath, requestApiKey, cleanPrompt, projectId)
   }
 
   getSession(sessionId: string): PipelineState | null {
@@ -94,7 +97,7 @@ export class PipelineStore {
       updatedAt: Date.now(),
     }
     this.cache.set(sessionId, updated)
-    this.logger.debug({ sessionId }, "Pipeline: nsfwSpec updated with image descriptions")
+    this.logger.debug({ sessionId, projectId: existing.projectId }, "Pipeline: nsfwSpec updated with image descriptions")
     return updated
   }
 
@@ -112,7 +115,7 @@ export class PipelineStore {
     }
     this.cache.set(sessionId, updated)
     this.logger.info(
-      { sessionId, placeholderCount: report.placeholders.length },
+      { sessionId, projectId: existing.projectId, placeholderCount: report.placeholders.length },
       "Pipeline: implementation report captured"
     )
     return updated
@@ -134,6 +137,7 @@ export class PipelineStore {
     this.logger.info(
       {
         sessionId,
+        projectId: existing.projectId,
         editCount: fillResult.edits.length,
         contentFileCount: fillResult.contentFiles.length,
       },
@@ -158,6 +162,7 @@ export class PipelineStore {
     this.logger.info(
       {
         sessionId,
+        projectId: existing.projectId,
         totalReplacementsApplied: applyResult.totalReplacementsApplied,
         totalContentFilesWritten: applyResult.totalContentFilesWritten,
         rolledBack: applyResult.rolledBack,
@@ -180,7 +185,7 @@ export class PipelineStore {
       ...(error !== undefined ? { error } : {}),
     }
     this.cache.set(sessionId, updated)
-    this.logger.info({ sessionId, status, error }, "Pipeline: status updated")
+    this.logger.info({ sessionId, projectId: existing.projectId, status, error }, "Pipeline: status updated")
     return updated
   }
 

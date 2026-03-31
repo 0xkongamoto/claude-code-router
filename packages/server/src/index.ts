@@ -20,7 +20,7 @@ import { activateImageAgentForSfw, handleNsfwImages } from "./sanitizer/imageRou
 import { EventEmitter } from "node:events";
 import { pluginManager, tokenSpeedPlugin } from "@musistudio/llms";
 import { Switcher, createSwitcherHook } from "./switcher";
-import { Sanitizer, createSanitizerHook } from "./sanitizer";
+import { Sanitizer, createSanitizerHook, extractProjectPath, extractProjectId } from "./sanitizer";
 import { PipelineStore } from "./sanitizer/store";
 import { ReportAccumulator } from "./sanitizer/report";
 import { NsfwFillService } from "./sanitizer/fill";
@@ -247,6 +247,14 @@ async function getServer(options: RunOptions = {}) {
     }
   })
 
+  // Extract projectId from system prompt (for /v1/messages) or request body (for pipeline API)
+  serverInstance.addHook("preHandler", async (req: any) => {
+    if (req.pathname?.endsWith("/v1/messages") && req.body?.system) {
+      const projectPath = extractProjectPath(req.body.system)
+      req.projectId = extractProjectId(projectPath) || null
+    }
+  })
+
   // Strip thinking blocks from previous messages to avoid invalid signature errors
   // when routing through different providers/proxies
   serverInstance.addHook("preHandler", async (req: any, reply: any) => {
@@ -379,7 +387,7 @@ async function getServer(options: RunOptions = {}) {
     event.emit('onError', request, reply, error);
   })
   serverInstance.addHook("onSend", (req: any, reply: any, payload: any, done: any) => {
-    const relation_id = { reqId: req.id, sessionId: req.sessionId || null }
+    const relation_id = { reqId: req.id, sessionId: req.sessionId || null, projectId: req.projectId || null }
 
     if (req.sessionId && req.pathname.endsWith("/v1/messages")) {
       if (payload instanceof ReadableStream) {
@@ -683,7 +691,7 @@ async function getServer(options: RunOptions = {}) {
             ? `[${error.kind}] ${error.message}`
             : error.message
           serverInstance.app.log.error(
-            { sessionId, error: errorMsg, kind: error.kind },
+            { sessionId, projectId: state.projectId, error: errorMsg, kind: error.kind },
             "Pipeline: NSFW fill failed (all retries exhausted)"
           )
           pipelineStore.setStatus(sessionId, "error", errorMsg)
@@ -733,7 +741,7 @@ async function getServer(options: RunOptions = {}) {
             ? `[${error.kind}] ${error.message}`
             : error.message
           serverInstance.app.log.error(
-            { sessionId, error: errorMsg, kind: error.kind },
+            { sessionId, projectId: state.projectId, error: errorMsg, kind: error.kind },
             "Pipeline: apply failed"
           )
           pipelineStore.setStatus(sessionId, "error", errorMsg)
@@ -750,7 +758,7 @@ async function getServer(options: RunOptions = {}) {
     })
 
     serverInstance.app.post("/api/pipeline/trigger-complete", async (req: any, reply: any) => {
-      const { projectPath: filterProjectPath, skipBuild } = req.body || {}
+      const { projectPath: filterProjectPath, skipBuild, projectId: reqProjectId } = req.body || {}
 
       let sessions = pipelineStore.listSessions()
         .filter((s: any) => s.status === "sfw_in_progress" && s.projectPath)
@@ -760,18 +768,19 @@ async function getServer(options: RunOptions = {}) {
       }
 
       if (sessions.length === 0) {
-        serverInstance.app.log.info("Pipeline: trigger-complete — no sfw_in_progress sessions")
+        serverInstance.app.log.info({ projectId: reqProjectId || null }, "Pipeline: trigger-complete — no sfw_in_progress sessions")
         return { triggered: 0 }
       }
 
       const pipelineOptions = skipBuild ? { skipBuild: true } : undefined
       const results: Array<{ sessionId: string; placeholders: number }> = []
       for (const session of sessions) {
+        const projectId = reqProjectId || session.projectId || null
         try {
           const scanResults = await scanProjectPlaceholders(session.projectPath!)
           if (scanResults.length === 0) {
             serverInstance.app.log.info(
-              { sessionId: session.sessionId, projectPath: session.projectPath },
+              { sessionId: session.sessionId, projectId, projectPath: session.projectPath },
               "Pipeline: trigger-complete — no placeholders found, skipping"
             )
             continue
@@ -780,14 +789,14 @@ async function getServer(options: RunOptions = {}) {
           const report = buildSyntheticReport(session.projectPath!, scanResults)
           pipelineStore.setReport(session.sessionId, report)
           serverInstance.app.log.info(
-            { sessionId: session.sessionId, placeholderCount: report.placeholders.length },
+            { sessionId: session.sessionId, projectId, placeholderCount: report.placeholders.length },
             "Pipeline: trigger-complete — synthetic report created"
           )
           event.emit("pipeline:reportCaptured", session.sessionId, pipelineOptions)
           results.push({ sessionId: session.sessionId, placeholders: report.placeholders.length })
         } catch (err: any) {
           serverInstance.app.log.error(
-            { sessionId: session.sessionId, error: err.message },
+            { sessionId: session.sessionId, projectId, error: err.message },
             "Pipeline: trigger-complete scan failed"
           )
         }
@@ -803,6 +812,7 @@ async function getServer(options: RunOptions = {}) {
         const state = pipelineStore.getSession(sessionId)
         if (!state || state.status !== 'sfw_complete') return
         if (!state.nsfwSpec || !state.implementationReport) return
+        const projectId = state.projectId
 
         // Phase 2: NSFW fill (use TK1 from request if available, fallback to config apiKey)
         pipelineStore.setStatus(sessionId, 'nsfw_in_progress')
@@ -813,7 +823,7 @@ async function getServer(options: RunOptions = {}) {
         let projectPath = state.projectPath
         if (!projectPath) {
           serverInstance.app.log.warn(
-            { sessionId },
+            { sessionId, projectId },
             'Pipeline: auto-apply skipped — projectPath not captured from request'
           )
           return
@@ -823,7 +833,7 @@ async function getServer(options: RunOptions = {}) {
         const applyResult = await applyService.executeApply(fillResult, projectPath, options)
         pipelineStore.setApplyResult(sessionId, applyResult)
         serverInstance.app.log.info(
-          { sessionId, projectPath, skipBuild: !!options?.skipBuild },
+          { sessionId, projectId, projectPath, skipBuild: !!options?.skipBuild },
           'Pipeline: auto-apply complete'
         )
       } catch (err: any) {

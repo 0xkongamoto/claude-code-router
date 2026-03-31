@@ -95,7 +95,7 @@ export class Sanitizer {
     }
   }
 
-  async decompose(messages: any[], requestApiKey?: string): Promise<SanitizerResult | null> {
+  async decompose(messages: any[], requestApiKey?: string, projectId?: string | null): Promise<SanitizerResult | null> {
     const classificationContent = extractAllMessagesText(messages)
     if (!classificationContent) {
       this.logger.debug("Sanitizer: no text content found in messages, skipping")
@@ -127,6 +127,7 @@ export class Sanitizer {
         latencyMs: result.latencyMs,
         hasCleanPrompt: result.cleanPrompt !== null,
         hasNsfwSpec: result.nsfwSpec !== null,
+        ...(projectId ? { projectId } : {}),
       },
       "Sanitizer: decomposition result"
     )
@@ -144,6 +145,16 @@ export function extractProjectPath(system: any): string | null {
   if (!text) return null
   const match = text.match(/Primary working directory:\s*(.+)/)
   return match?.[1]?.trim() || null
+}
+
+/**
+ * Extract projectId from a project path.
+ * Path format: /tmp/one-workspaces/{userId}/projects/{projectId}/...
+ */
+export function extractProjectId(projectPath: string | null | undefined): string | null {
+  if (!projectPath) return null
+  const match = projectPath.match(/\/projects\/([^/]+)/)
+  return match?.[1] || null
 }
 
 export function createSanitizerHook(sanitizer: Sanitizer, store: PipelineStore | null, logger?: any) {
@@ -165,7 +176,7 @@ export function createSanitizerHook(sanitizer: Sanitizer, store: PipelineStore |
       req.pipelineApiKey = requestApiKey
     }
 
-    const result = await sanitizer.decompose(req.body.messages, requestApiKey)
+    const result = await sanitizer.decompose(req.body.messages, requestApiKey, req.projectId)
     if (!result) {
       return
     }
@@ -188,7 +199,7 @@ export function createSanitizerHook(sanitizer: Sanitizer, store: PipelineStore |
       ) {
         const hookLogger = logger || sanitizer["logger"]
         hookLogger.warn(
-          { sessionId: req.sessionId, storedClassification: existingSession.originalClassification },
+          { sessionId: req.sessionId, projectId: req.projectId || existingSession.projectId, storedClassification: existingSession.originalClassification },
           "Sanitizer: API failed, using session-cached NSFW classification and cleanPrompt"
         )
 
@@ -274,7 +285,8 @@ export function createSanitizerHook(sanitizer: Sanitizer, store: PipelineStore |
       // Initialize pipeline state for this session
       if (store && req.sessionId && result.nsfwSpec) {
         const projectPath = extractProjectPath(req.body.system)
-        store.initSessionIfNeeded(req.sessionId, result.nsfwSpec, result.originalClassification, projectPath, requestApiKey, result.cleanPrompt)
+        const projectId = req.projectId || extractProjectId(projectPath)
+        store.initSessionIfNeeded(req.sessionId, result.nsfwSpec, result.originalClassification, projectPath, requestApiKey, result.cleanPrompt, projectId)
       }
 
       // Log nsfwSpec for manual retrieval
@@ -282,6 +294,7 @@ export function createSanitizerHook(sanitizer: Sanitizer, store: PipelineStore |
       hookLogger.info(
         {
           originalClassification: result.originalClassification,
+          projectId: req.projectId || null,
           nsfwSpec: result.nsfwSpec,
           cleanPrompt: result.cleanPrompt,
         },
