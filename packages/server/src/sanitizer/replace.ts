@@ -133,16 +133,10 @@ export function replaceLastUserMessageContent(
     }
 
     if (targetIdx === -1) {
-      // No text block found (tool-result-only message).
-      // Append cleanPrompt as a new text block — the first user message
-      // will be sanitized to "[Prior context]", so without this the task
-      // description is lost entirely.
-      const newBlocks = [...blocks, { type: "text", text: newContent }]
-      return [
-        ...messages.slice(0, lastUserIdx),
-        { ...lastUserMessage, content: newBlocks },
-        ...messages.slice(lastUserIdx + 1),
-      ]
+      // No text block found (e.g., tool-result-only message).
+      // Don't inject cleanPrompt — tool results should pass through unchanged.
+      // The SFW Claude already has the instruction from the first turn.
+      return messages
     }
 
     const newBlocks = [
