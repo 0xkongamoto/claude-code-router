@@ -374,6 +374,12 @@ async function sendRequestToProvider(
     ...(config?.headers || {}),
   };
 
+  // Forward x-auto-api-key from incoming request
+  const autoApiKeyRaw = context?.req?.headers?.["x-auto-api-key"];
+  if (autoApiKeyRaw) {
+    requestHeaders["x-auto-api-key"] = Array.isArray(autoApiKeyRaw) ? autoApiKeyRaw[0] : autoApiKeyRaw;
+  }
+
   // Token passthrough: ensure client token overrides empty auth headers set by transformers
   // (e.g., Anthropic transformer auth() overwrites x-api-key with empty provider.apiKey)
   if (!provider.apiKey && clientToken) {
