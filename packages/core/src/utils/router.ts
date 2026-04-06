@@ -312,6 +312,33 @@ export const router = async (req: any, _res: any, context: RouterContext) => {
     req.body.model = Router?.default;
     req.scenarioType = 'default';
   }
+
+  // Apply API-key-based provider overrides
+  const incomingApiKey = req.headers?.["x-api-key"];
+  if (incomingApiKey && req.body.model?.includes(",")) {
+    const routerConfig = configService.get("Router");
+    const overrides = routerConfig?.apiKeyOverrides;
+    if (Array.isArray(overrides)) {
+      const clientKey = Array.isArray(incomingApiKey) ? incomingApiKey[0] : incomingApiKey;
+      const [currentProvider, ...modelParts] = req.body.model.split(",");
+      const modelName = modelParts.join(",");
+      for (const override of overrides) {
+        const keyMatch = override.apiKey
+          ? clientKey === override.apiKey
+          : override.apiKeyPrefix
+            ? clientKey.startsWith(override.apiKeyPrefix)
+            : false;
+        if (keyMatch && currentProvider === override.from) {
+          req.body.model = `${override.to},${modelName}`;
+          req.log.info(
+            `[API Key Override] Rerouting provider: '${override.from}' → '${override.to}', model: '${modelName}'`
+          );
+          break;
+        }
+      }
+    }
+  }
+
   return;
 };
 
