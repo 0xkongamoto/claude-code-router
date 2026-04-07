@@ -87,23 +87,25 @@ export function extractLastUserMessage(messages: Message[]): string | null {
     return null
   }
 
-  const lastMessage = messages[messages.length - 1]
-  if (lastMessage.role !== "user") {
-    return null
-  }
+  // Walk backwards to find the last user message with actual text content.
+  // The last message may be a tool_result-only message (no text blocks),
+  // so we need to search further back for the real user intent.
+  for (let m = messages.length - 1; m >= 0; m--) {
+    const message = messages[m]
+    if (message.role !== "user") continue
 
-  if (typeof lastMessage.content === "string") {
-    return stripSystemContent(lastMessage.content)
-  }
+    if (typeof message.content === "string") {
+      const stripped = stripSystemContent(message.content)
+      if (stripped) return stripped
+    }
 
-  if (Array.isArray(lastMessage.content)) {
-    // In Claude Code, the actual user text is the last text block.
-    // Earlier blocks contain system reminders, CLAUDE.md, tool results, etc.
-    for (let i = lastMessage.content.length - 1; i >= 0; i--) {
-      const block = lastMessage.content[i]
-      if (block.type === "text" && typeof block.text === "string") {
-        const stripped = stripSystemContent(block.text)
-        if (stripped) return stripped
+    if (Array.isArray(message.content)) {
+      for (let i = message.content.length - 1; i >= 0; i--) {
+        const block = message.content[i]
+        if (block.type === "text" && typeof block.text === "string") {
+          const stripped = stripSystemContent(block.text)
+          if (stripped) return stripped
+        }
       }
     }
   }
