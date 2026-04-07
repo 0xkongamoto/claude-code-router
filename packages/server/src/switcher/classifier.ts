@@ -113,6 +113,45 @@ export function extractLastUserMessage(messages: Message[]): string | null {
   return null
 }
 
+const MAX_RECENT_USER_MESSAGES = 10
+
+export function extractRecentUserTexts(messages: Message[]): string | null {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return null
+  }
+
+  const texts: string[] = []
+  // Walk backwards, collect up to MAX_RECENT_USER_MESSAGES user text messages
+  for (let m = messages.length - 1; m >= 0 && texts.length < MAX_RECENT_USER_MESSAGES; m--) {
+    const message = messages[m]
+    if (message.role !== "user") continue
+
+    if (typeof message.content === "string") {
+      const stripped = stripSystemContent(message.content)
+      if (stripped) texts.push(stripped)
+      continue
+    }
+
+    if (Array.isArray(message.content)) {
+      // Only extract text blocks, skip tool_result blocks
+      const msgTexts: string[] = []
+      for (const block of message.content) {
+        if (block.type === "text" && typeof block.text === "string") {
+          const stripped = stripSystemContent(block.text)
+          if (stripped) msgTexts.push(stripped)
+        }
+      }
+      if (msgTexts.length > 0) {
+        texts.push(msgTexts.join("\n"))
+      }
+    }
+  }
+
+  if (texts.length === 0) return null
+  // Reverse so oldest comes first (chronological order)
+  return texts.reverse().join("\n---\n")
+}
+
 export function extractAllMessagesText(messages: Message[]): string | null {
   if (!Array.isArray(messages) || messages.length === 0) {
     return null
