@@ -31,10 +31,23 @@ export function stripSystemContent(text: string): string {
   return stripped.trim()
 }
 
-const CLASSIFIER_PROMPT = `Classify the following coding assistant conversation by task complexity as "heavy" or "standard".
+const CLASSIFIER_PROMPT = `Classify the following message by task complexity as "heavy" or "standard".
 
-HEAVY = coding tasks, code generation, data analysis, image-related requests, debugging, refactoring, architecture decisions, multi-step reasoning, complex problem solving, file editing, test writing, deep research, research, analyze.
-STANDARD = basic questions, simple chat, one-line answers, greetings, status checks, clarifications, simple explanations.
+HEAVY = tasks requiring significant effort, reasoning, or generation:
+- Coding: code generation, debugging, refactoring, file editing, test writing, architecture decisions
+- Research & analysis: research, deep research, analyze, data analysis, compare, investigate, summarize large topics
+- Creative & complex: image-related requests, multi-step reasoning, complex problem solving, planning
+
+STANDARD = quick, low-effort responses:
+- Greetings, status checks, simple yes/no questions, one-line answers, clarifications, simple explanations
+
+RULE: If the message contains "research", "analyze", "investigate", or "deep" + action verb, classify as "heavy".
+
+Examples:
+- "research and analyze the today gas price" → heavy
+- "deep research and give me more analysis" → heavy
+- "hello, how are you?" → standard
+- "what is the status?" → standard
 
 Reply with ONLY this JSON, nothing else:
 {"classification":"<heavy_or_standard>","confidence":<0_to_1>}`
