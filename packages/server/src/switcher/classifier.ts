@@ -33,7 +33,7 @@ export function stripSystemContent(text: string): string {
 
 const CLASSIFIER_PROMPT = `Classify the following coding assistant conversation by task complexity as "heavy" or "standard".
 
-HEAVY = coding tasks, code generation, data analysis, image-related requests, debugging, refactoring, architecture decisions, multi-step reasoning, complex problem solving, file editing, test writing.
+HEAVY = coding tasks, code generation, data analysis, image-related requests, debugging, refactoring, architecture decisions, multi-step reasoning, complex problem solving, file editing, test writing, deep research, research, analyze.
 STANDARD = basic questions, simple chat, one-line answers, greetings, status checks, clarifications, simple explanations.
 
 Reply with ONLY this JSON, nothing else:
