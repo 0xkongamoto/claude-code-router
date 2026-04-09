@@ -369,8 +369,13 @@ async function sendRequestToProvider(
       fastify.log.warn(`[Token Passthrough] Provider '${provider.name}' has empty api_key, and no client token received!`);
     }
   }
+  // Forward x-auto-task-id from incoming request
+  const clientAutoTaskIdRaw = context?.req?.headers?.["x-auto-task-id"];
+  const clientAutoTaskId = Array.isArray(clientAutoTaskIdRaw) ? clientAutoTaskIdRaw[0] : clientAutoTaskIdRaw;
+
   const requestHeaders: Record<string, string> = {
     ...(effectiveApiKey ? { Authorization: effectiveApiKey.includes(' ') ? effectiveApiKey : `Bearer ${effectiveApiKey}` } : {}),
+    ...(clientAutoTaskId ? { "x-auto-task-id": clientAutoTaskId } : {}),
     ...(config?.headers || {}),
   };
 
