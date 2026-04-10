@@ -31,7 +31,9 @@ export function stripSystemContent(text: string): string {
   return stripped.trim()
 }
 
-const CLASSIFIER_PROMPT = `Classify the following message by task complexity as "heavy" or "standard".
+const CLASSIFIER_PROMPT = `Classify the task complexity of the [CURRENT MESSAGE] as "heavy" or "standard".
+
+You will be given conversation history as context. Classify ONLY the [CURRENT MESSAGE]. Use [HISTORY] only to resolve references when the current message is a short follow-up like "continue", "do it", "yes", "go on", "tiếp tục", "làm đi" — in those cases, inherit the classification of the task being continued.
 
 HEAVY = tasks requiring significant effort, reasoning, or generation:
 - Coding: code generation, debugging, refactoring, file editing, test writing, architecture decisions
@@ -41,13 +43,16 @@ HEAVY = tasks requiring significant effort, reasoning, or generation:
 STANDARD = quick, low-effort responses:
 - Greetings, status checks, simple yes/no questions, one-line answers, clarifications, simple explanations
 
-RULE: If the message contains "research", "analyze", "investigate", or "deep" + action verb, classify as "heavy".
+RULE: If the [CURRENT MESSAGE] itself contains "research", "analyze", "investigate", or "deep" + action verb, classify as "heavy". Do NOT apply this rule to keywords that only appear in [HISTORY].
 
 Examples:
-- "research and analyze the today gas price" → heavy
-- "deep research and give me more analysis" → heavy
-- "hello, how are you?" → standard
-- "what is the status?" → standard
+- [CURRENT MESSAGE]="research and analyze the today gas price" → heavy
+- [CURRENT MESSAGE]="deep research and give me more analysis" → heavy
+- [CURRENT MESSAGE]="hello, how are you?" → standard
+- [CURRENT MESSAGE]="what is the status?" → standard
+- [HISTORY]="analyze how BTC works" + [CURRENT MESSAGE]="hi" → standard (greeting, ignore history keyword)
+- [HISTORY]="refactor the auth module" + [CURRENT MESSAGE]="continue" → heavy (continues a heavy task)
+- [HISTORY]="what time is it?" + [CURRENT MESSAGE]="thanks" → standard
 
 Reply with ONLY this JSON, nothing else:
 {"classification":"<heavy_or_standard>","confidence":<0_to_1>}`
@@ -121,7 +126,8 @@ export function extractRecentUserTexts(messages: Message[]): string | null {
   }
 
   const texts: string[] = []
-  // Walk backwards, collect up to MAX_RECENT_USER_MESSAGES user text messages
+  // Walk backwards, collect up to MAX_RECENT_USER_MESSAGES user text messages.
+  // texts[0] is the most recent user message, texts[1..] are progressively older.
   for (let m = messages.length - 1; m >= 0 && texts.length < MAX_RECENT_USER_MESSAGES; m--) {
     const message = messages[m]
     if (message.role !== "user") continue
@@ -148,8 +154,19 @@ export function extractRecentUserTexts(messages: Message[]): string | null {
   }
 
   if (texts.length === 0) return null
-  // Reverse so oldest comes first (chronological order)
-  return texts.reverse().join("\n---\n")
+
+  // Separate the latest message from history so the classifier prompt can
+  // distinguish the CURRENT user intent from older context. Older messages
+  // may contain keywords ("analyze", "research") that should not poison the
+  // classification of a short latest message like "hi" or "thanks".
+  const current = texts[0]
+  const history = texts.slice(1).reverse() // chronological: oldest → newest
+
+  if (history.length === 0) {
+    return `[CURRENT MESSAGE]\n${current}`
+  }
+
+  return `[HISTORY]\n${history.join("\n---\n")}\n\n[CURRENT MESSAGE]\n${current}`
 }
 
 export function extractAllMessagesText(messages: Message[]): string | null {
@@ -202,6 +219,47 @@ export function extractUserOnlyText(messages: Message[]): string | null {
 
 export function hashContent(content: string): string {
   return createHash("sha256").update(content).digest("hex")
+}
+
+const CURRENT_MARKER = "[CURRENT MESSAGE]\n"
+const HISTORY_TRUNCATED_PREFIX = "[HISTORY]\n...(truncated)...\n"
+
+/**
+ * Truncate classifier input while preserving the [CURRENT MESSAGE] section.
+ * When content fits, returns it unchanged. When it doesn't, drops the oldest
+ * history first so the LLM always sees the full current user intent.
+ */
+export function truncateForClassifier(content: string, maxLength: number): string {
+  if (content.length <= maxLength) return content
+
+  const currentIdx = content.indexOf(CURRENT_MARKER)
+  if (currentIdx === -1) {
+    // Content has no marker format (e.g. callers passing raw text) —
+    // fall back to tail-preserving slice for backward compatibility.
+    return content.slice(-maxLength)
+  }
+
+  // Everything from [CURRENT MESSAGE] to the end must be preserved verbatim.
+  const currentSection = content.slice(currentIdx)
+
+  if (currentSection.length >= maxLength) {
+    // Current section alone exceeds budget — keep its tail (the user's actual
+    // text) and ensure the marker prefix is still present so the LLM knows
+    // which part is the current intent.
+    const tail = currentSection.slice(-(maxLength - CURRENT_MARKER.length))
+    return CURRENT_MARKER + tail
+  }
+
+  // Budget left for history. Keep the most recent history tail so context
+  // about immediately prior turns is retained.
+  const historyBudget = maxLength - currentSection.length - HISTORY_TRUNCATED_PREFIX.length
+  if (historyBudget <= 0) {
+    return currentSection
+  }
+
+  const historyPart = content.slice(0, currentIdx)
+  const truncatedHistory = historyPart.slice(-historyBudget)
+  return HISTORY_TRUNCATED_PREFIX + truncatedHistory + currentSection
 }
 
 function extractJson(text: string): string | null {
@@ -274,10 +332,9 @@ export async function classifyContent(
   requestApiKey?: string
 ): Promise<TaskClassificationResult> {
   const startTime = Date.now()
-  // Truncate from the end to keep the most recent (most relevant) content
-  const truncated = content.length > config.maxContentLength
-    ? content.slice(-config.maxContentLength)
-    : content
+  // Truncate while preserving the [CURRENT MESSAGE] section so the classifier
+  // always sees the full current user intent, even when history is long.
+  const truncated = truncateForClassifier(content, config.maxContentLength)
   const contentHash = hashContent(truncated)
 
   // Check cache
