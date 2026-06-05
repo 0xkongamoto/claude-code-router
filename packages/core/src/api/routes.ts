@@ -12,6 +12,66 @@ import { ConfigService } from "@/services/config";
 import { ProviderService } from "@/services/provider";
 import { TransformerService } from "@/services/transformer";
 import { Transformer } from "@/types/transformer";
+import { createWriteStream, mkdirSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
+
+/**
+ * Tap a Response body to a file without consuming it for the client.
+ * Uses ReadableStream.tee() to clone the stream: one branch is returned
+ * (so downstream transformers / the client still get the data), the other
+ * is drained to a dump file. Used to capture both the raw provider response
+ * (pre-transform) and the final Anthropic-format response (post-transform).
+ *
+ * Disabled by default; set CCR_DUMP_RESPONSES=1 (or true) to enable.
+ * Dump directory: $CCR_DUMP_DIR or ~/.claude-code-router/response-dumps
+ */
+function dumpResponseToFile(response: any, label: string, info: string): any {
+  try {
+    const enabled =
+      process.env.CCR_DUMP_RESPONSES === "1" ||
+      process.env.CCR_DUMP_RESPONSES === "true";
+    if (!enabled) return response;
+    if (!response?.body || typeof response.body.tee !== "function") {
+      return response;
+    }
+
+    const dir =
+      process.env.CCR_DUMP_DIR ||
+      join(homedir(), ".claude-code-router", "response-dumps");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `${label}.log`);
+
+    const [clientBranch, dumpBranch] = response.body.tee();
+
+    (async () => {
+      const ws = createWriteStream(file);
+      ws.write(`# ${label} | ${info}\n`);
+      const reader = dumpBranch.getReader();
+      try {
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) ws.write(Buffer.from(value));
+        }
+      } catch {
+        // Ignore dump errors — must never affect the client response
+      } finally {
+        ws.end();
+      }
+    })();
+
+    return new Response(clientBranch, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  } catch {
+    // Never let dumping break the request path
+    return response;
+  }
+}
 
 // Extend FastifyInstance to include custom services
 declare module "fastify" {
@@ -75,10 +135,18 @@ async function handleTransformerEndpoint(
       }
     );
 
+    // Dump the raw provider response (pre-transform, e.g. OpenAI SSE format)
+    const dumpInfo = `reqId=${req.id} provider=${provider.name} model=${requestBody.model}`;
+    const rawResponse = dumpResponseToFile(
+      response,
+      "provider-raw",
+      dumpInfo
+    );
+
     // Process response transformer chain
     const finalResponse = await processResponseTransformers(
       requestBody,
-      response,
+      rawResponse,
       provider,
       transformer,
       bypass,
@@ -87,9 +155,27 @@ async function handleTransformerEndpoint(
       }
     );
 
+    // Dump the transformed response (post-transform, Anthropic format)
+    const dumpedFinalResponse = dumpResponseToFile(
+      finalResponse,
+      "anthropic-transformed",
+      dumpInfo
+    );
+
+    // Forward selected provider response headers to the client.
+    // Transformers rebuild the response as a new object, so these headers
+    // would otherwise be lost. Read them from the raw provider response.
+    const forwardHeaders = ["x-proxy-request-log-id"];
+    for (const headerName of forwardHeaders) {
+      const headerValue = response.headers?.get?.(headerName);
+      if (headerValue) {
+        reply.header(headerName, headerValue);
+      }
+    }
+
     // Format and return response
     // Use requestBody (not original body) because transformers may change stream mode
-    return formatResponse(finalResponse, reply, requestBody);
+    return formatResponse(dumpedFinalResponse, reply, requestBody);
   } catch (error: any) {
     // Handle fallback if error occurs
     if (error.code === 'provider_response_error') {
