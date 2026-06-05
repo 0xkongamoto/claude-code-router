@@ -90,18 +90,25 @@ export class OpenAIResponsesTransformer implements Transformer {
     if (systemMessages.length > 0) {
       const firstSystem = systemMessages[0];
       if (Array.isArray(firstSystem.content)) {
-        firstSystem.content.forEach((item) => {
-          let text = "";
-          if (typeof item === "string") {
-            text = item;
-          } else if (item && typeof item === "object" && "text" in item) {
-            text = (item as { text: string }).text;
-          }
-          input.push({
-            role: "system",
-            content: text,
-          });
-        });
+        // Responses API expects the system prompt in `instructions`.
+        // Join all text blocks (Claude Code sends `system` as an array of
+        // text blocks) so the upstream proxy does not reject the request
+        // with "Instructions are required".
+        const instructions = firstSystem.content
+          .map((item) => {
+            if (typeof item === "string") {
+              return item;
+            }
+            if (item && typeof item === "object" && "text" in item) {
+              return (item as { text: string }).text;
+            }
+            return "";
+          })
+          .filter((text) => text.length > 0)
+          .join("\n");
+        if (instructions) {
+          (request as any).instructions = instructions;
+        }
       } else {
         (request as any).instructions = firstSystem.content;
       }
@@ -226,7 +233,14 @@ export class OpenAIResponsesTransformer implements Transformer {
         statusText: response.statusText,
         headers: response.headers,
       });
-    } else if (contentType.includes("text/event-stream")) {
+    } else if (
+      contentType.includes("text/event-stream") ||
+      contentType.includes("text/plain")
+    ) {
+      // Some upstreams (e.g. the codex-auto subscription proxy) stream
+      // Responses-API SSE but label it as "text/plain" instead of
+      // "text/event-stream". Treat text/plain as a stream so the SSE is
+      // converted here and re-emitted with the correct Content-Type.
       if (!response.body) {
         return response;
       }
