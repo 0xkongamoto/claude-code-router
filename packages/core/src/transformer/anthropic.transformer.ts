@@ -888,26 +888,44 @@ export class AnthropicTransformer implements Transformer {
                     const anthropicStopReason =
                       stopReasonMapping[choice.finish_reason] || "end_turn";
 
+                    // Preserve usage already captured from a usage-bearing chunk.
+                    // Some providers (e.g. OpenRouter/DeepSeek) emit the
+                    // finish_reason chunk WITHOUT usage, then a separate chunk
+                    // carrying token usage. Only override usage when this chunk
+                    // actually carries it; otherwise keep what we already have.
+                    const usage = chunk.usage
+                      ? {
+                          input_tokens:
+                            (chunk.usage?.prompt_tokens || 0) -
+                            (chunk.usage?.prompt_tokens_details?.cached_tokens ||
+                              0),
+                          output_tokens: chunk.usage?.completion_tokens || 0,
+                          cache_read_input_tokens:
+                            chunk.usage?.prompt_tokens_details?.cached_tokens ||
+                            0,
+                        }
+                      : stopReasonMessageDelta?.usage || {
+                          input_tokens: 0,
+                          output_tokens: 0,
+                          cache_read_input_tokens: 0,
+                        };
+
                     stopReasonMessageDelta = {
                       type: "message_delta",
                       delta: {
                         stop_reason: anthropicStopReason,
                         stop_sequence: null,
                       },
-                      usage: {
-                        input_tokens:
-                          (chunk.usage?.prompt_tokens || 0) -
-                          (chunk.usage?.prompt_tokens_details?.cached_tokens ||
-                            0),
-                        output_tokens: chunk.usage?.completion_tokens || 0,
-                        cache_read_input_tokens:
-                          chunk.usage?.prompt_tokens_details?.cached_tokens ||
-                          0,
-                      },
+                      usage,
                     };
                   }
 
-                  break;
+                  // Do NOT break here: the chunk carrying token usage may arrive
+                  // AFTER the finish_reason chunk (and often in the same read
+                  // batch). Breaking the line loop would drop that usage chunk,
+                  // leaving usage at 0. Continue so the usage branch above can
+                  // still update stopReasonMessageDelta before the stream ends.
+                  continue;
                 }
               } catch (parseError: any) {
                 this.logger?.error(
