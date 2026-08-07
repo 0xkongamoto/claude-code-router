@@ -18,7 +18,8 @@ import { OpenAITransformer } from "./openai.transformer";
 import { CustomParamsTransformer } from "./customparams.transformer";
 import { VercelTransformer } from "./vercel.transformer";
 import { OpenAIResponsesTransformer } from "./openai.responses.transformer";
-import { ForceReasoningTransformer } from "./forcereasoning.transformer"
+import { ForceReasoningTransformer } from "./forcereasoning.transformer";
+import { DeepseekV4Transformer } from "./deepseek-v4.transformer";
 
 export default {
   AnthropicTransformer,
@@ -41,5 +42,6 @@ export default {
   CustomParamsTransformer,
   VercelTransformer,
   OpenAIResponsesTransformer,
-  ForceReasoningTransformer
+  ForceReasoningTransformer,
+  DeepseekV4Transformer
 };
